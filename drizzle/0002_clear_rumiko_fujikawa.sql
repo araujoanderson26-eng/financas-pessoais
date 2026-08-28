@@ -1,0 +1,1 @@
+ALTER TABLE `wealth_items` ADD `remaining_debt` real DEFAULT 0 NOT NULL;

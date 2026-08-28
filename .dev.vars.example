@@ -1,0 +1,3 @@
+# Opcional: sem esta chave, o consultor usa a análise financeira local.
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.6
