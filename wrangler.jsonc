@@ -1,24 +1,27 @@
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "financas-pessoais",
-  "main": "dist/server/index.js",
-  "compatibility_date": "2026-08-08",
-  "compatibility_flags": ["nodejs_compat"],
-  "assets": {
-    "directory": "dist/client",
-    "binding": "ASSETS"
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "financas-pessoais-db",
-      "migrations_dir": "drizzle"
-    }
-  ],
-  "images": {
-    "binding": "IMAGES"
-  },
-  "observability": {
-    "enabled": true
-  }
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "financas-pessoais",
+	"main": "dist/server/index.js",
+	"compatibility_date": "2026-08-08",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"assets": {
+		"directory": "dist/client",
+		"binding": "ASSETS"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "financas-pessoais-db",
+			"migrations_dir": "drizzle",
+			"database_id": "55f94e0a-d5e1-4ee1-9c77-4a416dfb20b0"
+		}
+	],
+	"images": {
+		"binding": "IMAGES"
+	},
+	"observability": {
+		"enabled": true
+	}
 }
