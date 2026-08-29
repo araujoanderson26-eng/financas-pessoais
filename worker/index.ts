@@ -27,6 +27,45 @@ const defaultCategories = [
   ["Alimentação", "Variável"], ["Lazer", "Variável"], ["Compras", "Variável"],
 ];
 
+const defaultSettings = {
+  profileName: "Anderson de Araujo",
+  productName: "Nexo Finanças Pessoais",
+  signature: "by Anderson de Araujo",
+  currency: "BRL",
+  locale: "pt-BR",
+  dateFormat: "DD/MM/AAAA",
+  theme: "system",
+  density: "comfortable",
+  hideValues: false,
+  exportIdentity: true,
+  exportOwner: true,
+  exportGeneratedAt: true,
+  exportTotals: true,
+  exportFilters: true,
+  exportFreezeHeader: true,
+};
+
+const saoPauloDate = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const asBoolean = (value: unknown) => value === true || value === 1 || value === "1";
+const normalizeSettings = (row?: Record<string, unknown> | null) => ({
+  profileName: String(row?.profileName || defaultSettings.profileName),
+  productName: String(row?.productName || defaultSettings.productName),
+  signature: String(row?.signature || defaultSettings.signature),
+  currency: "BRL" as const,
+  locale: "pt-BR" as const,
+  dateFormat: "DD/MM/AAAA" as const,
+  theme: (["light", "dark", "system"].includes(String(row?.theme)) ? String(row?.theme) : defaultSettings.theme) as "light" | "dark" | "system",
+  density: (["comfortable", "compact"].includes(String(row?.density)) ? String(row?.density) : defaultSettings.density) as "comfortable" | "compact",
+  hideValues: asBoolean(row?.hideValues),
+  exportIdentity: row?.exportIdentity === undefined ? true : asBoolean(row.exportIdentity),
+  exportOwner: row?.exportOwner === undefined ? true : asBoolean(row.exportOwner),
+  exportGeneratedAt: row?.exportGeneratedAt === undefined ? true : asBoolean(row.exportGeneratedAt),
+  exportTotals: row?.exportTotals === undefined ? true : asBoolean(row.exportTotals),
+  exportFilters: row?.exportFilters === undefined ? true : asBoolean(row.exportFilters),
+  exportFreezeHeader: row?.exportFreezeHeader === undefined ? true : asBoolean(row.exportFreezeHeader),
+  updatedAt: row?.updatedAt ? String(row.updatedAt) : undefined,
+});
+
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const ownerOf = (request: Request) => {
   const url = new URL(request.url);
@@ -44,7 +83,7 @@ async function financeApi(request: Request, env: Env) {
       await env.DB.batch(defaultCategories.map(([name, macro]) => env.DB.prepare("INSERT INTO categories (owner, name, macro) VALUES (?, ?, ?)").bind(owner, name, macro)));
       categoryResult = await env.DB.prepare("SELECT id, name, macro FROM categories WHERE owner = ? ORDER BY id").bind(owner).all();
     }
-    const [transactionResult, investmentResult, accountResult, budgetResult, goalResult, wealthResult, subscriptionResult, eventResult, noteResult] = await Promise.all([
+    const [transactionResult, investmentResult, accountResult, budgetResult, goalResult, wealthResult, subscriptionResult, eventResult, noteResult, settingsResult, backupResult] = await Promise.all([
       env.DB.prepare("SELECT id, date, description, category, macro, type, value, account, recurrence, installment_current AS installmentCurrent, installment_total AS installmentTotal FROM transactions WHERE owner = ? AND archived_at IS NULL ORDER BY date DESC, id DESC").bind(owner).all(),
       env.DB.prepare("SELECT id, name, type, value, return_pct AS returnPct FROM investments WHERE owner = ? ORDER BY id").bind(owner).all(),
       env.DB.prepare("SELECT id, name, type, balance, credit_limit AS creditLimit, scope, institution, closing_day AS closingDay, due_day AS dueDay FROM accounts WHERE owner = ? ORDER BY id").bind(owner).all(),
@@ -54,8 +93,30 @@ async function financeApi(request: Request, env: Env) {
       env.DB.prepare("SELECT id, name, category, account, value, billing_day AS billingDay, status FROM subscriptions WHERE owner = ? ORDER BY status, billing_day, name").bind(owner).all(),
       env.DB.prepare("SELECT id, transaction_id AS transactionId, action, snapshot, created_at AS createdAt FROM transaction_events WHERE owner = ? ORDER BY id DESC LIMIT 300").bind(owner).all(),
       env.DB.prepare("SELECT id, month, note, updated_at AS updatedAt FROM monthly_notes WHERE owner = ? ORDER BY month DESC").bind(owner).all(),
+      env.DB.prepare("SELECT profile_name AS profileName, product_name AS productName, signature, currency, locale, date_format AS dateFormat, theme, density, hide_values AS hideValues, export_identity AS exportIdentity, export_owner AS exportOwner, export_generated_at AS exportGeneratedAt, export_totals AS exportTotals, export_filters AS exportFilters, export_freeze_header AS exportFreezeHeader, updated_at AS updatedAt FROM user_settings WHERE owner = ?").bind(owner).first<Record<string, unknown>>(),
+      env.DB.prepare("SELECT id, kind, created_at AS createdAt FROM backup_events WHERE owner = ? ORDER BY id DESC LIMIT 20").bind(owner).all(),
     ]);
-    return json({ categories: categoryResult.results, transactions: transactionResult.results, investments: investmentResult.results, accounts: accountResult.results, budgets: budgetResult.results, goals: goalResult.results, wealthItems: wealthResult.results, subscriptions: subscriptionResult.results, auditEvents: eventResult.results, reportNotes: noteResult.results });
+    let settings = settingsResult;
+    if (!settings) {
+      const now = new Date().toISOString();
+      settings = await env.DB.prepare("INSERT INTO user_settings (owner, updated_at) VALUES (?, ?) RETURNING profile_name AS profileName, product_name AS productName, signature, currency, locale, date_format AS dateFormat, theme, density, hide_values AS hideValues, export_identity AS exportIdentity, export_owner AS exportOwner, export_generated_at AS exportGeneratedAt, export_totals AS exportTotals, export_filters AS exportFilters, export_freeze_header AS exportFreezeHeader, updated_at AS updatedAt").bind(owner, now).first<Record<string, unknown>>();
+    }
+
+    const investmentRows = investmentResult.results as Array<Record<string, unknown>>;
+    const accountRows = accountResult.results as Array<Record<string, unknown>>;
+    const wealthRows = wealthResult.results as Array<Record<string, unknown>>;
+    const investmentsTotal = investmentRows.reduce((sum, item) => sum + Number(item.value || 0), 0);
+    const accountBalance = accountRows.filter((item) => item.type !== "Cartão de crédito").reduce((sum, item) => sum + Number(item.balance || 0), 0);
+    const emergencyReserve = investmentRows.filter((item) => /reserva|liquidez|tesouro selic|cdb/i.test(`${item.name || ""} ${item.type || ""}`)).reduce((sum, item) => sum + Number(item.value || 0), 0);
+    const wealthAssets = wealthRows.filter((item) => item.kind === "Ativo").reduce((sum, item) => sum + Number(item.value || 0), 0);
+    const liabilities = wealthRows.reduce((sum, item) => sum + (item.kind === "Passivo" ? Number(item.value || 0) : Number(item.remainingDebt || 0)), 0);
+    const assets = wealthAssets + investmentsTotal + accountBalance;
+    const snapshotDate = saoPauloDate();
+    const createdAt = new Date().toISOString();
+    await env.DB.prepare("INSERT INTO financial_snapshots (owner, snapshot_date, net_worth, assets, liabilities, account_balance, investments, emergency_reserve, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(owner, snapshot_date) DO UPDATE SET net_worth = excluded.net_worth, assets = excluded.assets, liabilities = excluded.liabilities, account_balance = excluded.account_balance, investments = excluded.investments, emergency_reserve = excluded.emergency_reserve, created_at = excluded.created_at").bind(owner, snapshotDate, assets - liabilities, assets, liabilities, accountBalance, investmentsTotal, emergencyReserve, createdAt).run();
+    const snapshotResult = await env.DB.prepare("SELECT id, snapshot_date AS snapshotDate, net_worth AS netWorth, assets, liabilities, account_balance AS accountBalance, investments, emergency_reserve AS emergencyReserve, created_at AS createdAt FROM financial_snapshots WHERE owner = ? ORDER BY snapshot_date ASC LIMIT 730").bind(owner).all();
+
+    return json({ categories: categoryResult.results, transactions: transactionResult.results, investments: investmentResult.results, accounts: accountResult.results, budgets: budgetResult.results, goals: goalResult.results, wealthItems: wealthResult.results, subscriptions: subscriptionResult.results, auditEvents: eventResult.results, reportNotes: noteResult.results, settings: normalizeSettings(settings), snapshots: snapshotResult.results, backupEvents: backupResult.results });
   }
   if (request.method === "POST") {
     const payload = await request.json() as Record<string, unknown>;
@@ -72,7 +133,7 @@ async function financeApi(request: Request, env: Env) {
         return env.DB.prepare("INSERT INTO transactions (owner, date, description, category, macro, type, value, account, recurrence, installment_current, installment_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, date, description, category, macro, type, value, account, recurrence, installment_current AS installmentCurrent, installment_total AS installmentTotal").bind(owner, date.toISOString().slice(0, 10), description, payload.category, payload.macro, payload.type, installmentValue, payload.account || "Não informado", payload.recurrence || "Não", index + 1, installmentTotal);
       });
       const inserted = await env.DB.batch(prepared);
-      const items = inserted.flatMap(result => result.results || []);
+      const items = inserted.flatMap(result => result.results || []) as Array<Record<string, unknown>>;
       if (items.length) await env.DB.batch(items.map(item => env.DB.prepare("INSERT INTO transaction_events (owner, transaction_id, action, snapshot, created_at) VALUES (?, ?, ?, ?, ?)").bind(owner, Number(item.id), "Criado", JSON.stringify(item), new Date().toISOString())));
       return json({ item: items[0], items }, 201);
     }
@@ -128,6 +189,17 @@ async function financeApi(request: Request, env: Env) {
       const result = await env.DB.prepare("INSERT INTO monthly_notes (owner, month, note, updated_at) VALUES (?, ?, ?, ?) RETURNING id, month, note, updated_at AS updatedAt").bind(owner, payload.month, payload.note || "", new Date().toISOString()).first();
       return json({ item: result });
     }
+    if (action === "save_settings") {
+      const current = normalizeSettings(payload);
+      const updatedAt = new Date().toISOString();
+      const result = await env.DB.prepare("INSERT INTO user_settings (owner, profile_name, product_name, signature, currency, locale, date_format, theme, density, hide_values, export_identity, export_owner, export_generated_at, export_totals, export_filters, export_freeze_header, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(owner) DO UPDATE SET profile_name = excluded.profile_name, product_name = excluded.product_name, signature = excluded.signature, currency = excluded.currency, locale = excluded.locale, date_format = excluded.date_format, theme = excluded.theme, density = excluded.density, hide_values = excluded.hide_values, export_identity = excluded.export_identity, export_owner = excluded.export_owner, export_generated_at = excluded.export_generated_at, export_totals = excluded.export_totals, export_filters = excluded.export_filters, export_freeze_header = excluded.export_freeze_header, updated_at = excluded.updated_at RETURNING profile_name AS profileName, product_name AS productName, signature, currency, locale, date_format AS dateFormat, theme, density, hide_values AS hideValues, export_identity AS exportIdentity, export_owner AS exportOwner, export_generated_at AS exportGeneratedAt, export_totals AS exportTotals, export_filters AS exportFilters, export_freeze_header AS exportFreezeHeader, updated_at AS updatedAt").bind(owner, current.profileName, current.productName, current.signature, "BRL", "pt-BR", "DD/MM/AAAA", current.theme, current.density, current.hideValues ? 1 : 0, current.exportIdentity ? 1 : 0, current.exportOwner ? 1 : 0, current.exportGeneratedAt ? 1 : 0, current.exportTotals ? 1 : 0, current.exportFilters ? 1 : 0, current.exportFreezeHeader ? 1 : 0, updatedAt).first<Record<string, unknown>>();
+      return json({ item: normalizeSettings(result) });
+    }
+    if (action === "record_backup") {
+      const kind = String(payload.kind || "Exportação").slice(0, 80);
+      const result = await env.DB.prepare("INSERT INTO backup_events (owner, kind, created_at) VALUES (?, ?, ?) RETURNING id, kind, created_at AS createdAt").bind(owner, kind, new Date().toISOString()).first();
+      return json({ item: result }, 201);
+    }
     if (action === "save_budget") {
       await env.DB.prepare("DELETE FROM budgets WHERE owner = ? AND month = ? AND category = ?").bind(owner, payload.month, payload.category).run();
       const result = await env.DB.prepare("INSERT INTO budgets (owner, month, category, amount) VALUES (?, ?, ?, ?) RETURNING id, month, category, amount").bind(owner, payload.month, payload.category, Number(payload.amount)).first();
@@ -166,7 +238,8 @@ async function backupApi(request: Request, env: Env) {
   if (request.method !== "GET") return json({ error: "Método não permitido" }, 405);
   const owner = ownerOf(request);
   if (!owner) return json({ error: "Acesso protegido. Configure o Cloudflare Access para continuar." }, 401);
-  const tables = ["categories", "transactions", "investments", "accounts", "budgets", "goals", "wealth_items", "subscriptions", "transaction_events", "monthly_notes"];
+  await env.DB.prepare("INSERT INTO backup_events (owner, kind, created_at) VALUES (?, ?, ?)").bind(owner, "Backup JSON", new Date().toISOString()).run();
+  const tables = ["categories", "transactions", "investments", "accounts", "budgets", "goals", "wealth_items", "subscriptions", "transaction_events", "monthly_notes", "user_settings", "financial_snapshots", "backup_events"];
   const entries = await Promise.all(tables.map(async table => {
     const result = await env.DB.prepare(`SELECT * FROM ${table} WHERE owner = ?`).bind(owner).all();
     return [table, result.results] as const;

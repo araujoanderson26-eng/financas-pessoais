@@ -1,16 +1,18 @@
-# Finanças Pessoais
+# Nexo Finanças Pessoais
 
-Sistema web responsivo para gestão financeira pessoal, pronto para versionamento no GitHub e publicação em Cloudflare Workers com banco Cloudflare D1.
+Aplicação pessoal de gestão financeira com visão executiva, analytics, planejamento, relatórios e exportações profissionais. A produção usa o Worker existente `financas-pessoais` e o D1 existente `financas-pessoais-db`.
 
 ## O que está incluído
 
-- Dashboard com patrimônio, fluxo de caixa, taxa de poupança e gráficos
-- Contas PF/PJ, cartões, lançamentos, categorias e parcelas
-- Investimentos, assinaturas, orçamento, metas e patrimônio
-- Relatório mensal para impressão/PDF e análise automática
-- Filtros, histórico de alterações, exportação e backup
-- React 19, Vinext, TypeScript, Recharts, Cloudflare Workers e D1
-- Workflow do GitHub Actions para publicação automática
+- Dashboard executivo com score de saúde financeira, reserva, projeção, alertas, insights e comparações
+- Fluxo de caixa, evolução patrimonial por snapshots, despesas por categoria e orçado × realizado
+- Movimentações com filtros combináveis, busca, ordenação, resumos e paginação responsiva
+- Planejamento com contas, cartões, metas, recorrências, orçamentos e parcelamentos futuros
+- Patrimônio, investimentos e assinaturas com indicadores e análises consolidadas
+- Configurações persistidas, temas claro/escuro/sistema, densidade e ocultação de valores
+- Relatório mensal A4 e exportações `.xlsx` com identidade Nexo, filtros, totais e cabeçalho congelado
+- React 19, Vinext, TypeScript, Recharts, ExcelJS, Cloudflare Workers e D1
+- Workflow do GitHub Actions que aplica migrations incrementais e publica na `main`
 
 ## Requisitos
 
@@ -35,20 +37,19 @@ cp .dev.vars.example .dev.vars
 
 Nunca envie `.dev.vars` ao GitHub.
 
-## 2. Criar o repositório no GitHub
+## 2. Repositório e infraestrutura existentes
 
-Crie um repositório vazio no GitHub e execute, dentro desta pasta:
+Não crie recursos paralelos. Este código evolui exclusivamente:
 
-```bash
-git init
-git add .
-git commit -m "feat: versão inicial do Finanças Pessoais"
-git branch -M main
-git remote add origin https://github.com/SEU-USUARIO/financas-pessoais.git
-git push -u origin main
-```
+- GitHub: `araujoanderson26-eng/financas-pessoais`
+- Branch: `main`
+- Worker: `financas-pessoais`
+- D1: `financas-pessoais-db`
+- URL: `financas-pessoais.araujo-anderson26.workers.dev`
 
-## 3. Preparar a Cloudflare
+O `database_id` em `wrangler.jsonc` é parte da configuração versionada e não deve ser substituído.
+
+## 3. Validar e publicar
 
 Autentique a CLI:
 
@@ -56,24 +57,12 @@ Autentique a CLI:
 npx wrangler login
 ```
 
-Crie o banco e grave automaticamente o `database_id` em `wrangler.jsonc`:
+Antes de publicar, valide o pacote e aplique somente migrations incrementais:
 
 ```bash
-npx wrangler d1 create financas-pessoais-db --binding DB --update-config
-```
-
-Confirme que o arquivo `wrangler.jsonc` passou a conter um `database_id`, então versione essa alteração:
-
-```bash
-git add wrangler.jsonc
-git commit -m "chore: vincula banco D1"
-git push
-```
-
-Aplique as migrações e publique:
-
-```bash
-npm run build:cloudflare
+npm run lint
+npm test
+npm run cf:dry-run
 npm run cf:migrate
 npx wrangler deploy
 ```
@@ -132,6 +121,11 @@ npx wrangler versions list
 
 ```text
 app/                     interface e rotas da aplicação
+components/              módulos de produto e componentes compartilhados
+hooks/                   sincronização e preferências da interface
+lib/finance/             cálculos e modelos financeiros
+lib/excel/               exportações profissionais em Excel
+lib/formatters/          moeda, datas, meses e percentuais
 worker/index.ts          APIs, autenticação e entrada do Worker
 db/                      schema e acesso ao D1
 drizzle/                 migrações versionadas do banco
@@ -142,6 +136,8 @@ wrangler.jsonc           configuração da Cloudflare
 ## Backup e recuperação
 
 - A interface oferece exportação dos dados do usuário.
+- O backup JSON inclui configurações, snapshots e histórico de exportações.
+- O Excel completo reúne 11 abas e não altera o banco.
 - Antes de alterações importantes, exporte um backup pela aplicação.
 - Para restaurar uma versão do código, use o histórico do Git e publique novamente.
 - Para acompanhar publicações e versões do Worker, use `npx wrangler versions list`.
@@ -152,4 +148,3 @@ wrangler.jsonc           configuração da Cloudflare
 - Restrinja o acesso ao GitHub e à conta Cloudflare.
 - Ative autenticação de dois fatores nas duas contas.
 - Não remova a proteção de identidade de `worker/index.ts`.
-

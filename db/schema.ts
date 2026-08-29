@@ -86,3 +86,43 @@ export const monthlyNotes = sqliteTable("monthly_notes", {
   note: text("note").notNull().default(""),
   updatedAt: text("updated_at").notNull(),
 });
+
+export const userSettings = sqliteTable("user_settings", {
+  owner: text("owner").primaryKey(),
+  profileName: text("profile_name").notNull().default("Anderson de Araujo"),
+  productName: text("product_name").notNull().default("Nexo Finanças Pessoais"),
+  signature: text("signature").notNull().default("by Anderson de Araujo"),
+  currency: text("currency").notNull().default("BRL"),
+  locale: text("locale").notNull().default("pt-BR"),
+  dateFormat: text("date_format").notNull().default("DD/MM/AAAA"),
+  theme: text("theme").notNull().default("system"),
+  density: text("density").notNull().default("comfortable"),
+  hideValues: integer("hide_values", { mode: "boolean" }).notNull().default(false),
+  exportIdentity: integer("export_identity", { mode: "boolean" }).notNull().default(true),
+  exportOwner: integer("export_owner", { mode: "boolean" }).notNull().default(true),
+  exportGeneratedAt: integer("export_generated_at", { mode: "boolean" }).notNull().default(true),
+  exportTotals: integer("export_totals", { mode: "boolean" }).notNull().default(true),
+  exportFilters: integer("export_filters", { mode: "boolean" }).notNull().default(true),
+  exportFreezeHeader: integer("export_freeze_header", { mode: "boolean" }).notNull().default(true),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const financialSnapshots = sqliteTable("financial_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  owner: text("owner").notNull(),
+  snapshotDate: text("snapshot_date").notNull(),
+  netWorth: real("net_worth").notNull().default(0),
+  assets: real("assets").notNull().default(0),
+  liabilities: real("liabilities").notNull().default(0),
+  accountBalance: real("account_balance").notNull().default(0),
+  investments: real("investments").notNull().default(0),
+  emergencyReserve: real("emergency_reserve").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+});
+
+export const backupEvents = sqliteTable("backup_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  owner: text("owner").notNull(),
+  kind: text("kind").notNull(),
+  createdAt: text("created_at").notNull(),
+});

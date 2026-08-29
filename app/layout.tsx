@@ -13,8 +13,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Finanças Pessoais",
-  description: "Gestão financeira pessoal com visão patrimonial, planejamento e relatório mensal.",
+  title: {
+    default: "Nexo Finanças Pessoais",
+    template: "%s | Nexo",
+  },
+  description:
+    "Gestão financeira pessoal com visão executiva, planejamento, patrimônio e relatórios.",
   other: {
     "codex-preview": "development",
   },
