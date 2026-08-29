@@ -258,7 +258,10 @@ function fallbackAdvice(question: string, summary: Summary) {
   const lower = question.toLowerCase();
   const brl = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
   if (lower.includes("gasto") || lower.includes("reduzir")) return `Atue primeiro nos gastos variáveis, hoje em ${brl(summary.variable)}. Defina um teto semanal para lazer e compras e preserve os gastos essenciais.`;
-  if (lower.includes("reserva")) return `Sua reserva registrada é ${brl(summary.reserve)}. O próximo marco é ${brl(summary.fixed * 6)}, equivalente a seis meses dos compromissos fixos.`;
+  if (lower.includes("reserva")) {
+    if (summary.fixed <= 0) return "Ainda não há gastos fixos suficientes para estimar a cobertura da reserva. Registre os compromissos essenciais para o Nexo calcular a meta de seis meses.";
+    return `Sua reserva registrada é ${brl(summary.reserve)}. O próximo marco é ${brl(summary.fixed * 6)}, equivalente a seis meses dos compromissos fixos.`;
+  }
   if (lower.includes("invest")) return `Você tem ${brl(summary.portfolioTotal)} investidos. Preserve liquidez para a reserva e só aumente risco depois de definir objetivo e prazo para cada aporte.`;
   const budgetNote = summary.budgetTotal ? ` O orçamento do mês é ${brl(summary.budgetTotal)} e a projeção de saídas é ${brl(summary.projectedExpenses || 0)}.` : "";
   const alertNote = summary.alerts?.length ? ` Ponto de atenção: ${summary.alerts[0]}` : "";
