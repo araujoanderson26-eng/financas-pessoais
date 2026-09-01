@@ -25,7 +25,16 @@ export type Transaction = {
   installmentTotal?: number;
 };
 
-export type Category = { id?: number; name: string; macro: string };
+export type FinancialMacro = "Fixo" | "Variável" | "Receita";
+export type Category = {
+  id: number;
+  name: string;
+  macro: FinancialMacro;
+  transactionCount?: number;
+  budgetCount?: number;
+  subscriptionCount?: number;
+  referenceCount?: number;
+};
 export type Investment = { id?: number; name: string; type: string; value: number; returnPct: number };
 export type Account = {
   id: number;

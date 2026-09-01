@@ -27,6 +27,64 @@ const defaultCategories = [
   ["Alimentação", "Variável"], ["Lazer", "Variável"], ["Compras", "Variável"],
 ];
 
+const allowedCategoryMacros = new Set(["Fixo", "Variável", "Receita"]);
+const categorySelect = `
+  SELECT
+    c.id,
+    c.name,
+    c.macro,
+    (SELECT COUNT(*) FROM transactions t WHERE t.owner = c.owner AND t.category = c.name) AS transactionCount,
+    (SELECT COUNT(*) FROM budgets b WHERE b.owner = c.owner AND b.category = c.name) AS budgetCount,
+    (SELECT COUNT(*) FROM subscriptions s WHERE s.owner = c.owner AND s.category = c.name) AS subscriptionCount,
+    (
+      (SELECT COUNT(*) FROM transactions t WHERE t.owner = c.owner AND t.category = c.name) +
+      (SELECT COUNT(*) FROM budgets b WHERE b.owner = c.owner AND b.category = c.name) +
+      (SELECT COUNT(*) FROM subscriptions s WHERE s.owner = c.owner AND s.category = c.name)
+    ) AS referenceCount
+  FROM categories c
+  WHERE c.owner = ?
+  ORDER BY c.name COLLATE NOCASE, c.id
+`;
+
+type CategoryRow = { id: number; name: string; macro: string };
+type CategoryReferenceCounts = { transactionCount: number; budgetCount: number; subscriptionCount: number; referenceCount: number };
+
+const categoryInput = (payload: Record<string, unknown>) => ({
+  name: String(payload.name || "").trim(),
+  macro: String(payload.macro || ""),
+});
+
+const validId = (value: unknown) => {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+};
+
+async function categoryById(db: D1Database, owner: string, id: number) {
+  return db.prepare("SELECT id, name, macro FROM categories WHERE id = ? AND owner = ?").bind(id, owner).first<CategoryRow>();
+}
+
+async function categoryByName(db: D1Database, owner: string, name: string, excludedId?: number) {
+  const query = excludedId
+    ? "SELECT id, name, macro FROM categories WHERE owner = ? AND name = ? COLLATE NOCASE AND id <> ? LIMIT 1"
+    : "SELECT id, name, macro FROM categories WHERE owner = ? AND name = ? COLLATE NOCASE LIMIT 1";
+  const statement = db.prepare(query);
+  return (excludedId ? statement.bind(owner, name, excludedId) : statement.bind(owner, name)).first<CategoryRow>();
+}
+
+async function categoryReferenceCounts(db: D1Database, owner: string, name: string) {
+  return db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM transactions WHERE owner = ? AND category = ?) AS transactionCount,
+      (SELECT COUNT(*) FROM budgets WHERE owner = ? AND category = ?) AS budgetCount,
+      (SELECT COUNT(*) FROM subscriptions WHERE owner = ? AND category = ?) AS subscriptionCount,
+      (
+        (SELECT COUNT(*) FROM transactions WHERE owner = ? AND category = ?) +
+        (SELECT COUNT(*) FROM budgets WHERE owner = ? AND category = ?) +
+        (SELECT COUNT(*) FROM subscriptions WHERE owner = ? AND category = ?)
+      ) AS referenceCount
+  `).bind(owner, name, owner, name, owner, name, owner, name, owner, name, owner, name).first<CategoryReferenceCounts>();
+}
+
 const defaultSettings = {
   profileName: "Anderson de Araujo",
   productName: "Nexo Finanças Pessoais",
@@ -78,10 +136,10 @@ async function financeApi(request: Request, env: Env) {
   const owner = ownerOf(request);
   if (!owner) return json({ error: "Acesso protegido. Configure o Cloudflare Access para continuar." }, 401);
   if (request.method === "GET") {
-    let categoryResult = await env.DB.prepare("SELECT id, name, macro FROM categories WHERE owner = ? ORDER BY id").bind(owner).all();
+    let categoryResult = await env.DB.prepare(categorySelect).bind(owner).all();
     if (!categoryResult.results.length) {
       await env.DB.batch(defaultCategories.map(([name, macro]) => env.DB.prepare("INSERT INTO categories (owner, name, macro) VALUES (?, ?, ?)").bind(owner, name, macro)));
-      categoryResult = await env.DB.prepare("SELECT id, name, macro FROM categories WHERE owner = ? ORDER BY id").bind(owner).all();
+      categoryResult = await env.DB.prepare(categorySelect).bind(owner).all();
     }
     const [transactionResult, investmentResult, accountResult, budgetResult, goalResult, wealthResult, subscriptionResult, eventResult, noteResult, settingsResult, backupResult] = await Promise.all([
       env.DB.prepare("SELECT id, date, description, category, macro, type, value, account, recurrence, installment_current AS installmentCurrent, installment_total AS installmentTotal FROM transactions WHERE owner = ? AND archived_at IS NULL ORDER BY date DESC, id DESC").bind(owner).all(),
@@ -122,6 +180,8 @@ async function financeApi(request: Request, env: Env) {
     const payload = await request.json() as Record<string, unknown>;
     const action = String(payload.action || "");
     if (action === "transaction") {
+      const selectedCategory = await categoryByName(env.DB, owner, String(payload.category || "").trim());
+      if (!selectedCategory) return json({ error: "Selecione uma categoria válida." }, 400);
       const installmentTotal = Math.max(1, Math.min(120, Number(payload.installmentTotal || 1)));
       const totalValue = Number(payload.value);
       const baseDate = new Date(`${String(payload.date)}T12:00:00Z`);
@@ -130,7 +190,7 @@ async function financeApi(request: Request, env: Env) {
         date.setUTCMonth(date.getUTCMonth() + index);
         const installmentValue = index === installmentTotal - 1 ? totalValue - Math.round((totalValue / installmentTotal) * 100) / 100 * (installmentTotal - 1) : Math.round((totalValue / installmentTotal) * 100) / 100;
         const description = installmentTotal > 1 ? `${String(payload.description)} (${index + 1}/${installmentTotal})` : String(payload.description);
-        return env.DB.prepare("INSERT INTO transactions (owner, date, description, category, macro, type, value, account, recurrence, installment_current, installment_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, date, description, category, macro, type, value, account, recurrence, installment_current AS installmentCurrent, installment_total AS installmentTotal").bind(owner, date.toISOString().slice(0, 10), description, payload.category, payload.macro, payload.type, installmentValue, payload.account || "Não informado", payload.recurrence || "Não", index + 1, installmentTotal);
+        return env.DB.prepare("INSERT INTO transactions (owner, date, description, category, macro, type, value, account, recurrence, installment_current, installment_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, date, description, category, macro, type, value, account, recurrence, installment_current AS installmentCurrent, installment_total AS installmentTotal").bind(owner, date.toISOString().slice(0, 10), description, selectedCategory.name, selectedCategory.macro, payload.type, installmentValue, payload.account || "Não informado", payload.recurrence || "Não", index + 1, installmentTotal);
       });
       const inserted = await env.DB.batch(prepared);
       const items = inserted.flatMap(result => result.results || []) as Array<Record<string, unknown>>;
@@ -138,8 +198,10 @@ async function financeApi(request: Request, env: Env) {
       return json({ item: items[0], items }, 201);
     }
     if (action === "update_transaction") {
+      const selectedCategory = await categoryByName(env.DB, owner, String(payload.category || "").trim());
+      if (!selectedCategory) return json({ error: "Selecione uma categoria válida." }, 400);
       const before = await env.DB.prepare("SELECT * FROM transactions WHERE id = ? AND owner = ?").bind(Number(payload.id), owner).first();
-      const result = await env.DB.prepare("UPDATE transactions SET date = ?, description = ?, category = ?, macro = ?, type = ?, value = ?, account = ?, recurrence = ? WHERE id = ? AND owner = ? AND archived_at IS NULL RETURNING id, date, description, category, macro, type, value, account, recurrence, installment_current AS installmentCurrent, installment_total AS installmentTotal").bind(payload.date, payload.description, payload.category, payload.macro, payload.type, Number(payload.value), payload.account || "Não informado", payload.recurrence || "Não", Number(payload.id), owner).first();
+      const result = await env.DB.prepare("UPDATE transactions SET date = ?, description = ?, category = ?, macro = ?, type = ?, value = ?, account = ?, recurrence = ? WHERE id = ? AND owner = ? AND archived_at IS NULL RETURNING id, date, description, category, macro, type, value, account, recurrence, installment_current AS installmentCurrent, installment_total AS installmentTotal").bind(payload.date, payload.description, selectedCategory.name, selectedCategory.macro, payload.type, Number(payload.value), payload.account || "Não informado", payload.recurrence || "Não", Number(payload.id), owner).first();
       if (!result) return json({ error: "Lançamento não encontrado" }, 404);
       await env.DB.prepare("INSERT INTO transaction_events (owner, transaction_id, action, snapshot, created_at) VALUES (?, ?, ?, ?, ?)").bind(owner, Number(payload.id), "Atualizado", JSON.stringify({ before, after: result }), new Date().toISOString()).run();
       return json({ item: result });
@@ -152,10 +214,83 @@ async function financeApi(request: Request, env: Env) {
       return json({ deleted: result });
     }
     if (action === "category") {
-      const duplicate = await env.DB.prepare("SELECT id FROM categories WHERE owner = ? AND name = ? LIMIT 1").bind(owner, payload.name).first();
+      const { name, macro } = categoryInput(payload);
+      if (!name) return json({ error: "Informe o nome da categoria." }, 400);
+      if (!allowedCategoryMacros.has(macro)) return json({ error: "Macrocategoria inválida." }, 400);
+      const duplicate = await categoryByName(env.DB, owner, name);
       if (duplicate) return json({ error: "Esta categoria já existe." }, 409);
-      const result = await env.DB.prepare("INSERT INTO categories (owner, name, macro) VALUES (?, ?, ?) RETURNING id, name, macro").bind(owner, payload.name, payload.macro).first();
+      const result = await env.DB.prepare("INSERT INTO categories (owner, name, macro) VALUES (?, ?, ?) RETURNING id, name, macro").bind(owner, name, macro).first();
       return json({ item: result }, 201);
+    }
+    if (action === "update_category") {
+      const id = validId(payload.id);
+      if (!id) return json({ error: "Categoria inválida." }, 400);
+      const current = await categoryById(env.DB, owner, id);
+      if (!current) return json({ error: "Categoria não encontrada." }, 404);
+      const { name, macro } = categoryInput(payload);
+      if (!name) return json({ error: "Informe o nome da categoria." }, 400);
+      if (!allowedCategoryMacros.has(macro)) return json({ error: "Macrocategoria inválida." }, 400);
+      const duplicate = await categoryByName(env.DB, owner, name, id);
+      if (duplicate) return json({ error: "Esta categoria já existe." }, 409);
+
+      const [updated] = await env.DB.batch([
+        env.DB.prepare("UPDATE categories SET name = ?, macro = ? WHERE id = ? AND owner = ? RETURNING id, name, macro").bind(name, macro, id, owner),
+        env.DB.prepare("UPDATE transactions SET category = ?, macro = ? WHERE owner = ? AND category = ?").bind(name, macro, owner, current.name),
+        env.DB.prepare("UPDATE budgets SET category = ? WHERE owner = ? AND category = ?").bind(name, owner, current.name),
+        env.DB.prepare("UPDATE subscriptions SET category = ? WHERE owner = ? AND category = ?").bind(name, owner, current.name),
+      ]);
+      return json({ item: updated.results?.[0] });
+    }
+    if (action === "delete_category") {
+      const id = validId(payload.id);
+      if (!id) return json({ error: "Categoria inválida." }, 400);
+      const current = await categoryById(env.DB, owner, id);
+      if (!current) return json({ error: "Categoria não encontrada." }, 404);
+      const references = await categoryReferenceCounts(env.DB, owner, current.name);
+      if (Number(references?.referenceCount || 0) > 0) {
+        return json({
+          error: "Esta categoria está sendo utilizada. Transfira as referências antes de excluí-la.",
+          code: "CATEGORY_IN_USE",
+          references,
+        }, 409);
+      }
+
+      const result = await env.DB.prepare(`
+        DELETE FROM categories
+        WHERE id = ? AND owner = ?
+          AND NOT EXISTS (SELECT 1 FROM transactions WHERE owner = ? AND category = ?)
+          AND NOT EXISTS (SELECT 1 FROM budgets WHERE owner = ? AND category = ?)
+          AND NOT EXISTS (SELECT 1 FROM subscriptions WHERE owner = ? AND category = ?)
+        RETURNING id
+      `).bind(id, owner, owner, current.name, owner, current.name, owner, current.name).first();
+      if (!result) {
+        const latestReferences = await categoryReferenceCounts(env.DB, owner, current.name);
+        return json({
+          error: "Esta categoria passou a ser utilizada e não pode ser excluída sem transferência.",
+          code: "CATEGORY_IN_USE",
+          references: latestReferences,
+        }, 409);
+      }
+      return json({ deleted: result });
+    }
+    if (action === "replace_and_delete_category") {
+      const id = validId(payload.id);
+      const replacementId = validId(payload.replacementId);
+      if (!id || !replacementId || id === replacementId) return json({ error: "Selecione outra categoria para a transferência." }, 400);
+      const [current, replacement] = await Promise.all([
+        categoryById(env.DB, owner, id),
+        categoryById(env.DB, owner, replacementId),
+      ]);
+      if (!current) return json({ error: "Categoria de origem não encontrada." }, 404);
+      if (!replacement) return json({ error: "Categoria de destino não encontrada." }, 404);
+
+      await env.DB.batch([
+        env.DB.prepare("UPDATE transactions SET category = ?, macro = ? WHERE owner = ? AND category = ?").bind(replacement.name, replacement.macro, owner, current.name),
+        env.DB.prepare("UPDATE budgets SET category = ? WHERE owner = ? AND category = ?").bind(replacement.name, owner, current.name),
+        env.DB.prepare("UPDATE subscriptions SET category = ? WHERE owner = ? AND category = ?").bind(replacement.name, owner, current.name),
+        env.DB.prepare("DELETE FROM categories WHERE id = ? AND owner = ?").bind(id, owner),
+      ]);
+      return json({ deleted: { id }, replacement });
     }
     if (action === "investment") {
       const result = await env.DB.prepare("INSERT INTO investments (owner, name, type, value, return_pct) VALUES (?, ?, ?, ?, ?) RETURNING id, name, type, value, return_pct AS returnPct").bind(owner, payload.name, payload.type, Number(payload.value), Number(payload.returnPct || 0)).first();
@@ -176,7 +311,9 @@ async function financeApi(request: Request, env: Env) {
       return json({ item: result }, 201);
     }
     if (action === "save_subscription") {
-      const result = await env.DB.prepare("INSERT INTO subscriptions (owner, name, category, account, value, billing_day, status) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id, name, category, account, value, billing_day AS billingDay, status").bind(owner, payload.name, payload.category, payload.account || "Não informado", Number(payload.value), Number(payload.billingDay || 1), "Ativa").first();
+      const selectedCategory = await categoryByName(env.DB, owner, String(payload.category || "").trim());
+      if (!selectedCategory) return json({ error: "Selecione uma categoria válida." }, 400);
+      const result = await env.DB.prepare("INSERT INTO subscriptions (owner, name, category, account, value, billing_day, status) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id, name, category, account, value, billing_day AS billingDay, status").bind(owner, payload.name, selectedCategory.name, payload.account || "Não informado", Number(payload.value), Number(payload.billingDay || 1), "Ativa").first();
       return json({ item: result }, 201);
     }
     if (action === "archive_subscription") {
@@ -201,8 +338,10 @@ async function financeApi(request: Request, env: Env) {
       return json({ item: result }, 201);
     }
     if (action === "save_budget") {
-      await env.DB.prepare("DELETE FROM budgets WHERE owner = ? AND month = ? AND category = ?").bind(owner, payload.month, payload.category).run();
-      const result = await env.DB.prepare("INSERT INTO budgets (owner, month, category, amount) VALUES (?, ?, ?, ?) RETURNING id, month, category, amount").bind(owner, payload.month, payload.category, Number(payload.amount)).first();
+      const selectedCategory = await categoryByName(env.DB, owner, String(payload.category || "").trim());
+      if (!selectedCategory) return json({ error: "Selecione uma categoria válida." }, 400);
+      await env.DB.prepare("DELETE FROM budgets WHERE owner = ? AND month = ? AND category = ?").bind(owner, payload.month, selectedCategory.name).run();
+      const result = await env.DB.prepare("INSERT INTO budgets (owner, month, category, amount) VALUES (?, ?, ?, ?) RETURNING id, month, category, amount").bind(owner, payload.month, selectedCategory.name, Number(payload.amount)).first();
       return json({ item: result }, 201);
     }
     if (action === "save_goal") {

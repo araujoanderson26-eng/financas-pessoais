@@ -2,12 +2,12 @@
 
 import { lazy, Suspense, useMemo, useState, type FormEvent } from "react";
 import { AppShell, type GlobalSearchItem } from "@/components/layout/AppShell";
-import { FinanceModals, type FinanceModal } from "@/components/modals/FinanceModals";
+import { CategoryDeleteDialog, FinanceModals, type FinanceModal } from "@/components/modals/FinanceModals";
 import { ConfirmDialog, Skeleton, ToastViewport, type ToastItem } from "@/components/shared";
 import { useFinanceData } from "@/hooks/useFinanceData";
 import { getFinancialAnalytics } from "@/lib/finance/analytics";
 import { currentMonthKey, localIsoDate } from "@/lib/formatters";
-import type { Investment, Subscription, Tab, Transaction, UserSettings, WealthItem } from "@/lib/finance/types";
+import type { Category, Investment, Subscription, Tab, Transaction, UserSettings, WealthItem } from "@/lib/finance/types";
 
 const DashboardView = lazy(() => import("@/components/dashboard/DashboardView").then((module) => ({ default: module.DashboardView })));
 const TransactionsView = lazy(() => import("@/components/transactions/TransactionsView").then((module) => ({ default: module.TransactionsView })));
@@ -35,7 +35,11 @@ export default function Home() {
   const [selectedMonth, setSelectedMonth] = useState(currentMonthKey());
   const [modal, setModal] = useState<FinanceModal>(null);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [editingInvestment, setEditingInvestment] = useState<Investment | null>(null);
+  const [deletingCategory, setDeletingCategory] = useState<Category | null>(null);
+  const [replacementCategoryId, setReplacementCategoryId] = useState("");
+  const [categoryDeleteBusy, setCategoryDeleteBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -60,6 +64,7 @@ export default function Home() {
   function closeModal() {
     setModal(null);
     setEditingTransaction(null);
+    setEditingCategory(null);
     setEditingInvestment(null);
   }
 
@@ -71,6 +76,16 @@ export default function Home() {
   function openInvestment(item?: Investment) {
     setEditingInvestment(item || null);
     setModal("investment");
+  }
+
+  function openCategory(item?: Category) {
+    setEditingCategory(item || null);
+    setModal("category");
+  }
+
+  function openCategoryDelete(item: Category) {
+    setDeletingCategory(item);
+    setReplacementCategoryId("");
   }
 
   async function submitTransaction(event: FormEvent<HTMLFormElement>) {
@@ -87,8 +102,34 @@ export default function Home() {
   async function submitCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget).entries());
-    try { await sendAction({ action: "category", ...values }); closeModal(); toast("success", "Categoria criada"); }
-    catch (error) { toast("error", "Não foi possível criar a categoria", error instanceof Error ? error.message : undefined); }
+    try {
+      const wasEditing = Boolean(editingCategory);
+      await sendAction({ action: wasEditing ? "update_category" : "category", id: editingCategory?.id, ...values });
+      closeModal();
+      toast("success", wasEditing ? "Categoria atualizada" : "Categoria criada", wasEditing ? "Lançamentos e outras referências foram mantidos consistentes." : undefined);
+    } catch (error) { toast("error", "Não foi possível salvar a categoria", error instanceof Error ? error.message : undefined); }
+  }
+
+  async function confirmCategoryDelete() {
+    if (!deletingCategory) return;
+    const hasReferences = Number(deletingCategory.referenceCount ?? deletingCategory.transactionCount ?? 0) > 0;
+    setCategoryDeleteBusy(true);
+    try {
+      if (hasReferences) {
+        await sendAction({ action: "replace_and_delete_category", id: deletingCategory.id, replacementId: Number(replacementCategoryId) });
+        toast("success", "Categoria excluída", "Todos os lançamentos e referências foram transferidos.");
+      } else {
+        await sendAction({ action: "delete_category", id: deletingCategory.id });
+        toast("success", "Categoria excluída");
+      }
+      setDeletingCategory(null);
+      setReplacementCategoryId("");
+    } catch (error) {
+      toast("error", "Não foi possível excluir a categoria", error instanceof Error ? error.message : undefined);
+      void refresh(true);
+    } finally {
+      setCategoryDeleteBusy(false);
+    }
   }
 
   async function submitInvestment(event: FormEvent<HTMLFormElement>) {
@@ -191,7 +232,7 @@ export default function Home() {
     {active === "movimentos" && <TransactionsView transactions={data.transactions} categories={data.categories} accounts={data.accounts} selectedMonth={selectedMonth} hidden={data.settings.hideValues} onNew={() => openTransaction()} onEdit={openTransaction} onArchive={(item) => setDeleteTarget({kind:"transaction",id:item.id,label:item.description})} onExportXlsx={(rows,filters) => void runExcel("Excel de movimentações",async()=>{const excel=await loadExcel(); await excel.exportTransactionsWorkbook(exportContext,rows,filters);},false)} onExportCsv={exportCsv}/>}
     {active === "planejamento" && <PlanningView data={data} analytics={analytics} selectedMonth={selectedMonth} hidden={data.settings.hideValues} onSave={savePlanning} onDelete={(kind,id,label)=>setDeleteTarget({kind,id,label})} onExport={() => void runExcel("Excel de planejamento",async()=>{const excel=await loadExcel(); await excel.exportPlanningWorkbook(exportContext);},false)}/>}
     {active === "patrimonio" && <WealthView items={data.wealthItems} analytics={analytics} hidden={data.settings.hideValues} onSave={saveWealth} onDelete={(item:WealthItem)=>setDeleteTarget({kind:"wealth",id:item.id,label:item.name})} onExport={() => void runExcel("Excel patrimonial",async()=>{const excel=await loadExcel(); await excel.exportWealthWorkbook(exportContext);},false)}/>}
-    {active === "categorias" && <CategoriesView categories={data.categories} transactions={data.transactions} onNew={()=>setModal("category")}/>}
+    {active === "categorias" && <CategoriesView categories={data.categories} transactions={data.transactions} onNew={()=>openCategory()} onEdit={openCategory} onDelete={openCategoryDelete}/>}
     {active === "investimentos" && <InvestmentsView investments={data.investments} goals={data.goals} analytics={analytics} hidden={data.settings.hideValues} onNew={()=>openInvestment()} onEdit={openInvestment} onDelete={(item)=>item.id&&setDeleteTarget({kind:"investment",id:item.id,label:item.name})} onExport={() => void runExcel("Excel de investimentos",async()=>{const excel=await loadExcel(); await excel.exportInvestmentsWorkbook(exportContext);},false)}/>}
     {active === "assinaturas" && <SubscriptionsView subscriptions={data.subscriptions} transactions={data.transactions} categories={data.categories} accounts={data.accounts} hidden={data.settings.hideValues} onSave={saveSubscription} onArchive={(item:Subscription)=>setDeleteTarget({kind:"subscription",id:item.id,label:item.name})} onExport={() => void runExcel("Excel de assinaturas",async()=>{const excel=await loadExcel(); await excel.exportSubscriptionsWorkbook(exportContext);},false)}/>}
     {active === "historico" && <HistoryView events={data.auditEvents} backups={data.backupEvents} hidden={data.settings.hideValues} syncLabel={syncLabel} onBackupJson={downloadBackup} onFullExcel={() => void runExcel("Excel completo",async()=>{const excel=await loadExcel(); await excel.exportFullWorkbook(exportContext);})}/>}
@@ -202,7 +243,8 @@ export default function Home() {
 
   return <>
     <AppShell active={active} onNavigate={setActive} selectedMonth={selectedMonth} syncState={syncState} settings={data.settings} alertCount={analytics.alerts.length} searchItems={searchItems} onNewTransaction={() => openTransaction()} onTogglePrivacy={() => patchSettings({hideValues:!data.settings.hideValues})}><Suspense fallback={<section className="loading-page"><Skeleton rows={5}/></section>}>{currentContent}</Suspense></AppShell>
-    <FinanceModals modal={modal} categories={data.categories} accounts={data.accounts} editingTransaction={editingTransaction} editingInvestment={editingInvestment} onClose={closeModal} onTransaction={submitTransaction} onCategory={submitCategory} onInvestment={submitInvestment}/>
+    <FinanceModals modal={modal} categories={data.categories} accounts={data.accounts} editingTransaction={editingTransaction} editingCategory={editingCategory} editingInvestment={editingInvestment} onClose={closeModal} onTransaction={submitTransaction} onCategory={submitCategory} onInvestment={submitInvestment}/>
+    <CategoryDeleteDialog category={deletingCategory} categories={data.categories} replacementId={replacementCategoryId} busy={categoryDeleteBusy} onReplacementChange={setReplacementCategoryId} onCancel={()=>{setDeletingCategory(null);setReplacementCategoryId("");}} onConfirm={()=>void confirmCategoryDelete()}/>
     <ConfirmDialog open={Boolean(deleteTarget)} title={deleteTarget?.kind === "transaction" ? "Arquivar lançamento?" : deleteTarget?.kind === "subscription" ? "Arquivar assinatura?" : "Remover item?"} description={deleteTarget ? deleteTarget.kind === "transaction" ? `“${deleteTarget.label}” deixará de afetar os totais, mas continuará no histórico de auditoria.` : deleteTarget.kind === "subscription" ? `“${deleteTarget.label}” ficará inativa e deixará de compor o custo mensal.` : `“${deleteTarget.label}” será removido e os indicadores relacionados serão recalculados.` : ""} confirmLabel={deleteTarget?.kind === "transaction" || deleteTarget?.kind === "subscription" ? "Arquivar" : "Remover"} onCancel={()=>setDeleteTarget(null)} onConfirm={()=>void confirmDelete()}/>
     <ToastViewport items={toasts} dismiss={(id)=>setToasts((current)=>current.filter((item)=>item.id!==id))}/>
   </>;
