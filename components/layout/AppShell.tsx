@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import {
-  Bell,
   Bot,
   CircleDollarSign,
   CreditCard,
@@ -25,6 +24,8 @@ import {
 import type { SyncState } from "@/hooks/useFinanceData";
 import type { Tab, UserSettings } from "@/lib/finance/types";
 import { formatMonth } from "@/lib/formatters";
+import { AlertsButton } from "./AlertsButton";
+import type { getFinancialAnalytics } from "@/lib/finance/analytics";
 
 const controlNav = [
   { id: "dashboard" as Tab, label: "Visão geral", icon: LayoutDashboard },
@@ -46,7 +47,7 @@ export function AppShell({
   selectedMonth,
   syncState,
   settings,
-  alertCount,
+  alerts,
   searchItems,
   onNewTransaction,
   onTogglePrivacy,
@@ -57,7 +58,7 @@ export function AppShell({
   selectedMonth: string;
   syncState: SyncState;
   settings: UserSettings;
-  alertCount: number;
+  alerts: ReturnType<typeof getFinancialAnalytics>["alerts"];
   searchItems: GlobalSearchItem[];
   onNewTransaction: () => void;
   onTogglePrivacy: () => void;
@@ -109,7 +110,7 @@ export function AppShell({
           </div>
           <span className="topbar-period">{formatMonth(selectedMonth)}</span>
           <button className="icon-button privacy-toggle" onClick={onTogglePrivacy} aria-label={settings.hideValues ? "Exibir valores" : "Ocultar valores"} title={settings.hideValues ? "Exibir valores" : "Ocultar valores"}>{settings.hideValues ? <EyeOff /> : <Eye />}</button>
-          <button className="icon-button alerts-button" onClick={() => navigate("dashboard")} aria-label={`${alertCount} alertas financeiros`} title="Alertas financeiros"><Bell />{alertCount > 0 && <span>{alertCount}</span>}</button>
+          <AlertsButton alerts={alerts} selectedMonth={selectedMonth} syncState={syncState} />
           <button className="primary-button topbar-new" onClick={onNewTransaction}><Plus size={17} />Novo lançamento</button>
         </header>
         <div className="content">{children}</div>
