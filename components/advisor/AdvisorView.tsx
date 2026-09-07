@@ -6,6 +6,7 @@ import type { getFinancialAnalytics } from "@/lib/finance/analytics";
 import { formatMonth } from "@/lib/formatters";
 import { askAdvisor, recentHistory } from "@/lib/ai/client";
 import type { AdvisorMessage, AdvisorStatus } from "@/lib/ai/types";
+import { CLOUDFLARE_MODELS, DEFAULT_ADVISOR_PROVIDER, advisorLabel, isAdvisorProvider, type AdvisorProvider } from "@/lib/ai/models";
 
 type Analytics = ReturnType<typeof getFinancialAnalytics>;
 type Message = AdvisorMessage & { provider?: string };
@@ -18,7 +19,7 @@ export function AdvisorView({ analytics, month }: { analytics: Analytics; month:
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<AdvisorStatus | null>(null);
   const [connected, setConnected] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<"openai" | "cloudflare">("openai");
+  const [selectedProvider, setSelectedProvider] = useState<AdvisorProvider>(DEFAULT_ADVISOR_PROVIDER);
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inFlight = useRef(false);
 
@@ -46,7 +47,7 @@ export function AdvisorView({ analytics, month }: { analytics: Analytics; month:
     setQuestion("");
     try {
       const result = await askAdvisor(pending.content, month, recentHistory(chat), selectedProvider);
-      setChat([...chat, pending, { role: "assistant", content: result.answer, provider: result.provider === "openai" ? "OpenAI" : "Cloudflare AI" }]);
+      setChat([...chat, pending, { role: "assistant", content: result.answer, provider: advisorLabel(result) }]);
       setStatus(result);
       setConnected(true);
     } catch (cause) {
@@ -58,20 +59,22 @@ export function AdvisorView({ analytics, month }: { analytics: Analytics; month:
   }
 
   function submit(event: FormEvent) { event.preventDefault(); void send(question); }
-  const provider = status?.provider === "openai" ? "OpenAI" : "Cloudflare AI";
-  const statusLabel = !status ? error ? "Conexão indisponível" : "Verificando conexão" : !status.configured ? "IA não configurada" : `${provider} ${connected ? "conectada" : "configurada"}`;
+  const statusLabel = !status ? error ? "Conexão indisponível" : "Verificando conexão" : !status.configured ? "IA não configurada" : `${advisorLabel(status)} · ${connected ? "conectado" : "configurado"}`;
 
   return <section className="advisor-page">
     <div className="advisor-intro">
       <span className="advisor-seal"><Bot/></span><span className="eyebrow">ASSISTENTE IA</span>
       <h1>Perguntas melhores.<br/>Decisões mais claras.</h1>
       <p>Converse sobre seus gastos, metas e investimentos. A análise consulta seus registros salvos e considera as mensagens desta conversa.</p>
-      <label className="advisor-provider">Escolha a inteligência artificial<select aria-label="Inteligência artificial" value={selectedProvider} disabled={loading} onChange={(event) => { setSelectedProvider(event.target.value as "openai" | "cloudflare"); setStatus(null); setConnected(false); setChat([]); setError(null); }}><option value="openai">OpenAI · requer chave e créditos da API</option><option value="cloudflare">Cloudflare AI · cota gratuita disponível</option></select></label>
-      {selectedProvider === "cloudflare" && <p className="advisor-privacy">Esta opção usa Llama 3.3 no Cloudflare, não o ChatGPT. Tem uma cota diária gratuita; em contas Cloudflare pagas, excedentes podem ser cobrados.</p>}
+      <label className="advisor-provider">Escolha a inteligência artificial<select aria-label="Inteligência artificial" value={selectedProvider} disabled={loading} onChange={(event) => { const value = event.target.value; if (!isAdvisorProvider(value)) return; setSelectedProvider(value); setStatus(null); setConnected(false); setChat([]); setError(null); }}>
+        <optgroup label="Cota gratuita compartilhada · sem chave extra">{CLOUDFLARE_MODELS.map((option) => <option key={option.id} value={option.id}>{option.name} · Cloudflare</option>)}</optgroup>
+        <optgroup label="API paga"><option value="openai">OpenAI · requer chave e créditos</option></optgroup>
+      </select></label>
+      {selectedProvider !== "openai" && <p className="advisor-privacy">Llama, Qwen e Mistral funcionam pelo Cloudflare, sem novas chaves. Compartilham a mesma cota gratuita diária; trocar de modelo não renova a cota. Em contas Cloudflare pagas, excedentes podem ser cobrados. <a href="https://developers.cloudflare.com/workers-ai/platform/pricing/" target="_blank" rel="noreferrer">Consultar limites</a>.</p>}
       <div className="quick-prompts">{prompts.map((prompt) => <button key={prompt} disabled={loading} onClick={() => void send(prompt)}>{prompt}</button>)}</div>
       <div className="advisor-context"><Sparkles/><span><strong>{formatMonth(month)}</strong><small>{analytics.totals.count} lançamentos no mês · comparação com meses anteriores</small></span></div>
       <p className="advisor-privacy">Ao enviar uma pergunta, os dados financeiros necessários e as mensagens são enviados ao provedor indicado. A conversa permanece nesta tela até você sair ou iniciar outra.</p>
-      {status && !status.configured && <p role="status" className="advisor-setup">{selectedProvider === "openai" ? "Configure a chave da OpenAI nos segredos do Cloudflare, ou escolha Cloudflare AI acima. O login do ChatGPT, gratuito ou pago, não inclui créditos da API." : "A conexão Cloudflare AI ainda não está disponível. Confira o binding AI na configuração do Worker."}</p>}
+      {status && !status.configured && <p role="status" className="advisor-setup">{selectedProvider === "openai" ? "Configure a chave da OpenAI nos segredos do Cloudflare, ou escolha uma opção com cota gratuita acima. O login do ChatGPT, gratuito ou pago, não inclui créditos da API." : "A conexão Cloudflare AI ainda não está disponível. Confira o binding AI na configuração do Worker."}</p>}
     </div>
     <article className="chat-card">
       <header><span><Sparkles/><strong>Conversa financeira</strong></span><small className={connected ? "ai-connected" : "ai-pending"}><i/>{statusLabel}</small><button type="button" className="advisor-reset" disabled={loading || chat.length === 0} aria-label="Iniciar nova conversa" title="Nova conversa" onClick={() => { setChat([]); setError(null); setQuestion(""); }}><RotateCcw size={16}/></button></header>

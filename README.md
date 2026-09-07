@@ -93,7 +93,7 @@ O assistente usa a Responses API da OpenAI. Não existe mais resposta pronta fin
 2. No Cloudflare, abra **Workers & Pages > financas-pessoais > Settings > Variables and Secrets**.
 3. Adicione `OPENAI_API_KEY` como **Secret**, com sua chave. Nunca coloque a chave no código, no GitHub, em variáveis públicas ou no chat.
 4. Se houver um `OPENAI_MODEL` antigo, ajuste para `gpt-5.4-mini`, ou remova para usar esse padrão. Use outro modelo somente se sua conta tiver acesso e ele aceitar a Responses API.
-5. Salve e publique a configuração. No site, abra **Consultor IA** e envie uma pergunta. O indicador passa de **OpenAI configurada** para **OpenAI conectada** somente depois de uma resposta real.
+5. Salve e publique a configuração. No site, abra **Consultor IA**, selecione **OpenAI** e envie uma pergunta. O indicador passa de **OpenAI · configurado** para **OpenAI · conectado** somente depois de uma resposta real.
 
 Alternativa pela CLI já autenticada:
 
@@ -107,11 +107,21 @@ O backend calcula o contexto a partir dos registros D1 do usuário autenticado, 
 
 Há um limite de seis perguntas por minuto por usuário por localidade Cloudflare; esse limite não substitui um teto de gastos na conta OpenAI. O site inteiro deve continuar protegido pelo Cloudflare Access, inclusive `/api/advisor` e o domínio `workers.dev`.
 
-### Alternativa sem chave da OpenAI
+### Opções com cota gratuita, sem chave da OpenAI
 
-No **Consultor IA**, escolha **Cloudflare AI** no seletor e envie sua pergunta. O binding `AI` já está declarado no projeto. Essa opção usa Llama 3.3, é identificada como **Cloudflare AI**, e não é o ChatGPT. Os dados só são enviados ao provedor escolhido ao enviar uma pergunta. A troca de provedor inicia uma nova conversa. Nenhum erro provoca troca silenciosa de provedor.
+No **Consultor IA**, escolha um modelo no grupo **Cota gratuita compartilhada · sem chave extra**:
 
-O Workers AI tem cota diária gratuita, sujeita aos limites da conta; em contas pagas, o excedente pode ser cobrado. Consulte a [cota e os preços do Workers AI](https://developers.cloudflare.com/workers-ai/platform/pricing/). A opção OpenAI continua selecionada inicialmente. Para clientes diretos do endpoint que não indicam `?provider=`, `AI_PROVIDER=auto` usa a OpenAI quando há chave e Workers AI caso contrário; `AI_PROVIDER=cloudflare` força Workers AI.
+- **Llama 3.3 70B**: selecionado inicialmente; parâmetro `provider=cloudflare`.
+- **Qwen3 30B**: parâmetro `provider=cloudflare-qwen`.
+- **Mistral Small 3.1**: parâmetro `provider=cloudflare-mistral`.
+
+O binding `AI` já está declarado no projeto. Não é necessário criar novas chaves ou contas para esses modelos. Eles são executados no Workers AI, não são o ChatGPT e aparecem identificados pelo nome nas respostas. A opção OpenAI fica separada no grupo **API paga**.
+
+Todos compartilham a mesma cota de 10.000 neurons por dia da conta Cloudflare; trocar de modelo não renova a cota. No plano gratuito, novas solicitações param quando a cota acaba. Em contas pagas, o excedente pode ser cobrado. O consumo varia por modelo e tamanho da conversa. Consulte a [cota e os preços do Workers AI](https://developers.cloudflare.com/workers-ai/platform/pricing/).
+
+Os dados só são enviados ao provedor escolhido ao enviar uma pergunta. A troca de modelo inicia uma nova conversa. Nenhum erro provoca troca silenciosa de provedor. As respostas usam apenas o texto final, sem exibir os blocos de raciocínio dos modelos.
+
+Para clientes diretos do endpoint que não indicam `?provider=`, `AI_PROVIDER=auto` usa a OpenAI quando há chave e Llama caso contrário; `AI_PROVIDER=cloudflare`, `cloudflare-qwen` ou `cloudflare-mistral` seleciona o modelo correspondente. Sem configuração, o padrão do endpoint continua sendo OpenAI por compatibilidade; a interface sempre envia o modelo escolhido.
 
 Validação da integração (sem consumir API, com banco SQLite temporário e provedores simulados):
 

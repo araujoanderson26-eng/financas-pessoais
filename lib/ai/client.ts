@@ -1,6 +1,7 @@
 import type { AdvisorAnswer, AdvisorMessage } from "./types";
+import type { AdvisorProvider } from "./models";
 
-export async function askAdvisor(question: string, month: string, history: AdvisorMessage[], provider: "openai" | "cloudflare" = "openai"): Promise<AdvisorAnswer> {
+export async function askAdvisor(question: string, month: string, history: AdvisorMessage[], provider: AdvisorProvider = "openai"): Promise<AdvisorAnswer> {
   let response: Response;
   try {
     response = await fetch(`/api/advisor?provider=${provider}`, {

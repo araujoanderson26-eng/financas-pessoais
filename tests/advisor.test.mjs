@@ -21,8 +21,9 @@ function loadSource(path) {
   new Function("require", "module", "exports", outputText)(localRequire, compiledModule, compiledModule.exports);
   return compiledModule.exports;
 }
-const { advisorApi, advisorStatus, buildAdvisorContext, parseAdvisorInput } = loadSource(resolve(root, "worker/advisor"));
+const { advisorApi, advisorStatus, buildAdvisorContext, parseAdvisorInput, cloudflareAnswer } = loadSource(resolve(root, "worker/advisor"));
 const { recentHistory, askAdvisor } = loadSource(resolve(root, "lib/ai/client"));
+const { CLOUDFLARE_MODELS, DEFAULT_ADVISOR_PROVIDER, advisorLabel, isAdvisorProvider } = loadSource(resolve(root, "lib/ai/models"));
 const { EMPTY_FINANCE_DATA } = loadSource(resolve(root, "lib/finance/types"));
 const owner = "test-owner@example.test";
 const request = (overrides = {}, headers = {}) => new Request("https://finance.example.test/api/advisor", { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ question: "Qual categoria cresceu mais?", month: "2026-09", ...overrides }) });
@@ -147,6 +148,90 @@ test("explicit provider selection never falls back to a different provider", asy
   assert.equal((await (await advisorApi(unavailable, { ...env, OPENAI_API_KEY: undefined }, owner)).json()).code, "ai_not_configured");
   const invalid = new Request("https://finance.example.test/api/advisor?provider=unknown", request());
   assert.equal((await advisorApi(invalid, env, owner)).status, 400);
+});
+
+test("the default is a free-allowance model and the catalogue rejects arbitrary providers", () => {
+  assert.equal(DEFAULT_ADVISOR_PROVIDER, "cloudflare");
+  assert.equal(CLOUDFLARE_MODELS.length, 3);
+  assert.equal(new Set(CLOUDFLARE_MODELS.map((option) => option.id)).size, 3);
+  assert.ok(isAdvisorProvider("openai"));
+  for (const value of [null, undefined, {}, "auto", "unknown", "@cf/custom/model", "https://attacker.example.test"]) assert.equal(isAdvisorProvider(value), false);
+});
+
+for (const option of CLOUDFLARE_MODELS) {
+  test(`${option.name} reports configuration without an API key or inference`, async () => {
+    const input = new Request(`https://finance.example.test/api/advisor?provider=${option.id}`);
+    const expected = { configured: true, provider: "cloudflare", model: option.model };
+    assert.deepEqual(await (await advisorApi(input, { AI: {} }, owner)).json(), expected);
+    assert.equal(advisorLabel(expected), option.name);
+    assert.equal(advisorStatus({ AI: {}, AI_PROVIDER: option.id }).model, option.model);
+    assert.equal((await (await advisorApi(input, { OPENAI_API_KEY: "test" }, owner)).json()).configured, false);
+  });
+
+  test(`${option.name} receives owner data and returns final text without switching to OpenAI`, async (t) => {
+    const env = fixture(t);
+    t.mock.method(globalThis, "fetch", async () => { assert.fail("Must not call another provider"); });
+    env.AI = { run: async (model, input, options) => {
+      assert.equal(model, option.model);
+      assert.equal(input.max_tokens, option.maxTokens);
+      assert.ok(options.signal instanceof AbortSignal);
+      assert.equal(input.messages[0].role, "system");
+      const context = JSON.parse(input.messages[1].content.split("\n").slice(1).join("\n"));
+      assert.equal(context.totals.expenses, 400);
+      assert.equal(context.totals.income, 1000);
+      assert.doesNotMatch(JSON.stringify(input), /PRIVATE OTHER OWNER|99999|test-owner@|test-key/);
+      return option.id === "cloudflare" ? { response: "Saldo: R$ 600,00." } : { choices: [{ message: { content: "Saldo: R$ 600,00.", reasoning_content: "PRIVATE REASONING" }, finish_reason: "stop" }] };
+    } };
+    const input = new Request(`https://finance.example.test/api/advisor?provider=${option.id}`, request());
+    const response = await advisorApi(input, env, owner);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { configured: true, provider: "cloudflare", model: option.model, answer: "Saldo: R$ 600,00." });
+  });
+
+  test(`${option.name} is unavailable without the AI binding even with an OpenAI key`, async () => {
+    const input = new Request(`https://finance.example.test/api/advisor?provider=${option.id}`, request());
+    const response = await advisorApi(input, { OPENAI_API_KEY: "test" }, owner);
+    assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(body.code, "ai_not_configured");
+    assert.match(body.error, /binding AI/);
+    assert.equal(body.answer, undefined);
+  });
+}
+
+test("Cloudflare output parser never exposes reasoning or treats truncated output as complete", () => {
+  assert.equal(cloudflareAnswer({ response: "<think>private\nthoughts</think> Resposta final " }), "Resposta final");
+  assert.equal(cloudflareAnswer({ choices: [{ message: { reasoning_content: "private", content: "Resposta final" }, finish_reason: "stop" }] }), "Resposta final");
+  assert.equal(cloudflareAnswer({ response: "<think>unfinished thoughts" }), "");
+  assert.equal(cloudflareAnswer({ choices: [{ message: { reasoning_content: "private" } }] }), "");
+  for (const value of [null, "invalid", {}, { choices: [] }, { response: 42 }, { choices: [{ message: { content: null } }] }]) assert.equal(cloudflareAnswer(value), "");
+  assert.throws(() => cloudflareAnswer({ choices: [{ message: { content: "Truncated" }, finish_reason: "length" }] }), { code: "incomplete_response" });
+});
+
+test("Cloudflare incomplete, empty and quota errors remain actionable", async (t) => {
+  const env = { ...fixture(t), AI: { run: async () => ({ choices: [{ finish_reason: "length", message: { content: "Partial" } }] }) } };
+  const input = () => new Request("https://finance.example.test/api/advisor?provider=cloudflare-qwen", request());
+  assert.equal((await (await advisorApi(input(), env, owner)).json()).code, "incomplete_response");
+  env.AI.run = async () => ({ choices: [{ message: { reasoning_content: "private" } }] });
+  assert.equal((await (await advisorApi(input(), env, owner)).json()).code, "empty_response");
+  env.AI.run = async () => { throw new Error("private provider details"); };
+  const body = await (await advisorApi(input(), env, owner)).json();
+  assert.equal(body.code, "cloudflare_unavailable");
+  assert.match(body.error, /cota compartilhada/);
+  assert.equal(body.answer, undefined);
+  assert.doesNotMatch(body.error, /private provider details/);
+});
+
+test("client forwards the selected model on every request", async (t) => {
+  for (const option of CLOUDFLARE_MODELS) {
+    const mock = t.mock.method(globalThis, "fetch", async (url, input) => {
+      assert.equal(url, `/api/advisor?provider=${option.id}`);
+      assert.equal(JSON.parse(input.body).question, "Teste");
+      return Response.json({ configured: true, provider: "cloudflare", model: option.model, answer: "Resposta" });
+    });
+    assert.equal((await askAdvisor("Teste", "2026-09", [], option.id)).model, option.model);
+    mock.mock.restore();
+  }
 });
 
 test("comparison includes categories that disappeared and handles missing baseline", () => {
