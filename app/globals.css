@@ -453,6 +453,21 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .chat-card > form input { flex: 1; border: 0; outline: 0; color: var(--ink); background: transparent; }
 .chat-card > form button { display: grid; width: 38px; height: 38px; place-items: center; border: 0; border-radius: 9px; background: var(--green); color: #fff; cursor: pointer; }
 .chat-card > footer { padding: 10px 18px 16px; color: var(--muted); font-size: 8px; text-align: center; }
+.chat-messages { min-height: 0; }
+.message-body { max-width: 85%; min-width: 0; }
+.message-body p { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.message-body small { display: block; margin: 5px 2px; color: var(--muted); font-size: 10px; }
+.chat-card > header { gap: 8px; flex-wrap: wrap; }
+.chat-card > header .ai-pending i { background: var(--muted); }
+.advisor-reset { display: grid; place-items: center; padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); cursor: pointer; }
+.advisor-reset:disabled, .quick-prompts button:disabled, .chat-card > form button:disabled { opacity: .5; cursor: not-allowed; }
+.advisor-intro > .advisor-privacy { margin-top: 22px; font-size: 12px; }
+.advisor-intro > .advisor-setup, .advisor-error { padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--gold-soft); font-size: 13px; line-height: 1.6; }
+.advisor-error p { margin: 8px 0; }
+.advisor-error span { font-size: 12px; color: var(--muted); }
+.chat-card > form input { min-width: 0; }
+.advisor-provider { display: grid; gap: 8px; margin: 18px 0; color: var(--ink); font-size: 13px; }
+.advisor-provider select { width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); }
 
 .settings-layout { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
 .settings-card > .panel-header > svg { color: var(--green); }

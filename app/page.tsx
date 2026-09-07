@@ -220,13 +220,6 @@ export default function Home() {
     } catch (error) { toast("error", "Falha ao gerar Excel", error instanceof Error ? error.message : undefined); }
   }
 
-  async function askAdvisor(question: string) {
-    const response = await fetch("/api/advisor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, summary: { ...analytics.totals, portfolioTotal: analytics.portfolioTotal, reserve: analytics.emergencyReserve, budgetTotal: analytics.budgetTotal, projectedExpenses: analytics.projectedExpenses, netWorth: analytics.netWorth, recurringCommitment: analytics.recurringCommitment, alerts: analytics.alerts.map((item) => item.text) } }) });
-    const result = await response.json() as { answer?: string; error?: string };
-    if (!response.ok || !result.answer) throw new Error(result.error || "Não foi possível concluir a análise.");
-    return result.answer;
-  }
-
   const currentContent = syncState === "loading" && data.categories.length === 0 ? <section className="loading-page"><div className="skeleton-title"><Skeleton rows={2}/></div><div className="skeleton-grid">{Array.from({length:8},(_,index)=><article key={index}><Skeleton rows={3}/></article>)}</div></section> : <>
     {active === "dashboard" && <DashboardView data={data} analytics={analytics} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} hidden={data.settings.hideValues} onNavigate={setActive} onNewTransaction={() => openTransaction()}/>}
     {active === "movimentos" && <TransactionsView transactions={data.transactions} categories={data.categories} accounts={data.accounts} selectedMonth={selectedMonth} hidden={data.settings.hideValues} onNew={() => openTransaction()} onEdit={openTransaction} onArchive={(item) => setDeleteTarget({kind:"transaction",id:item.id,label:item.description})} onExportXlsx={(rows,filters) => void runExcel("Excel de movimentações",async()=>{const excel=await loadExcel(); await excel.exportTransactionsWorkbook(exportContext,rows,filters);},false)} onExportCsv={exportCsv}/>}
@@ -237,7 +230,7 @@ export default function Home() {
     {active === "assinaturas" && <SubscriptionsView subscriptions={data.subscriptions} transactions={data.transactions} categories={data.categories} accounts={data.accounts} hidden={data.settings.hideValues} onSave={saveSubscription} onArchive={(item:Subscription)=>setDeleteTarget({kind:"subscription",id:item.id,label:item.name})} onExport={() => void runExcel("Excel de assinaturas",async()=>{const excel=await loadExcel(); await excel.exportSubscriptionsWorkbook(exportContext);},false)}/>}
     {active === "historico" && <HistoryView events={data.auditEvents} backups={data.backupEvents} hidden={data.settings.hideValues} syncLabel={syncLabel} onBackupJson={downloadBackup} onFullExcel={() => void runExcel("Excel completo",async()=>{const excel=await loadExcel(); await excel.exportFullWorkbook(exportContext);})}/>}
     {active === "relatorio" && <ReportView key={`${selectedMonth}-${reportNote?.updatedAt||"new"}`} data={data} analytics={analytics} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} hidden={data.settings.hideValues} initialNote={reportNote?.note||""} onSaveNote={saveReportNote} onPrint={()=>window.print()} onExcel={() => void runExcel("Relatório mensal em Excel",async()=>{const excel=await loadExcel(); await excel.exportMonthlyWorkbook(exportContext);},false)}/>}
-    {active === "consultor" && <AdvisorView analytics={analytics} onAsk={askAdvisor}/>}
+    {active === "consultor" && <AdvisorView key={selectedMonth} analytics={analytics} month={selectedMonth}/>}
     {active === "configuracoes" && <SettingsView settings={data.settings} lastBackup={data.backupEvents[0]} syncState={syncLabel} onPatch={patchSettings} onSaveProfile={saveProfile} onBackupJson={downloadBackup} onFullExcel={() => void runExcel("Excel completo",async()=>{const excel=await loadExcel(); await excel.exportFullWorkbook(exportContext);})}/>}
   </>;
 

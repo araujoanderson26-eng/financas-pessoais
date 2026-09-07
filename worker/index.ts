@@ -1,24 +1,12 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { advisorApi } from "./advisor";
 
-interface Env {
-  ASSETS: Fetcher;
-  DB: D1Database;
+interface Env extends Cloudflare.Env {
   OPENAI_API_KEY?: string;
   OPENAI_MODEL?: string;
-  IMAGES: {
-    input(stream: ReadableStream): {
-      transform(options: Record<string, unknown>): {
-        output(options: { format: string; quality: number }): Promise<{ response(): Response }>;
-      };
-    };
-  };
-}
-
-interface ExecutionContext {
-  waitUntil(promise: Promise<unknown>): void;
-  passThroughOnException(): void;
+  AI_PROVIDER?: string;
 }
 
 const defaultCategories = [
@@ -391,43 +379,6 @@ async function backupApi(request: Request, env: Env) {
   });
 }
 
-type Summary = { balance: number; savingsRate: number; fixed: number; variable: number; portfolioTotal: number; reserve: number; budgetTotal?: number; projectedExpenses?: number; netWorth?: number; recurringCommitment?: number; alerts?: string[] };
-
-function fallbackAdvice(question: string, summary: Summary) {
-  const lower = question.toLowerCase();
-  const brl = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-  if (lower.includes("gasto") || lower.includes("reduzir")) return `Atue primeiro nos gastos variáveis, hoje em ${brl(summary.variable)}. Defina um teto semanal para lazer e compras e preserve os gastos essenciais.`;
-  if (lower.includes("reserva")) {
-    if (summary.fixed <= 0) return "Ainda não há gastos fixos suficientes para estimar a cobertura da reserva. Registre os compromissos essenciais para o Nexo calcular a meta de seis meses.";
-    return `Sua reserva registrada é ${brl(summary.reserve)}. O próximo marco é ${brl(summary.fixed * 6)}, equivalente a seis meses dos compromissos fixos.`;
-  }
-  if (lower.includes("invest")) return `Você tem ${brl(summary.portfolioTotal)} investidos. Preserve liquidez para a reserva e só aumente risco depois de definir objetivo e prazo para cada aporte.`;
-  const budgetNote = summary.budgetTotal ? ` O orçamento do mês é ${brl(summary.budgetTotal)} e a projeção de saídas é ${brl(summary.projectedExpenses || 0)}.` : "";
-  const alertNote = summary.alerts?.length ? ` Ponto de atenção: ${summary.alerts[0]}` : "";
-  return `Seu saldo mensal é ${brl(summary.balance)} e sua taxa de poupança é ${summary.savingsRate.toFixed(1)}%.${budgetNote}${alertNote} Priorize a reserva de emergência e revise os gastos variáveis semanalmente.`;
-}
-
-async function advisorApi(request: Request, env: Env) {
-  if (request.method !== "POST") return json({ error: "Método não permitido" }, 405);
-  const { question, summary } = await request.json() as { question?: string; summary?: Summary };
-  if (!question?.trim() || !summary) return json({ error: "Pergunta e resumo são obrigatórios" }, 400);
-  if (!env.OPENAI_API_KEY) return json({ answer: fallbackAdvice(question, summary), mode: "local" });
-  try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: env.OPENAI_MODEL || "gpt-5.6", store: false, instructions: "Você é um consultor de finanças pessoais. Responda em português do Brasil, de forma direta e prática, em até 120 palavras. Analise somente os números fornecidos. Não prometa retornos, não prescreva produtos específicos e destaque quando algo depender de perfil de risco.", input: `Resumo financeiro: ${JSON.stringify(summary)}\nPergunta: ${question}` }),
-    });
-    if (!response.ok) throw new Error("OpenAI indisponível");
-    const data = await response.json() as { output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
-    const answer = data.output?.flatMap(item => item.content || []).find(item => item.type === "output_text")?.text;
-    if (!answer) throw new Error("Resposta vazia");
-    return json({ answer, mode: "chatgpt" });
-  } catch {
-    return json({ answer: fallbackAdvice(question, summary), mode: "local" });
-  }
-}
-
 // Image security config. SVG sources with .svg extension auto-skip the
 // optimization endpoint on the client side (served directly, no proxy).
 // To route SVGs through the optimizer (with security headers), set
@@ -443,7 +394,8 @@ const worker = {
       return handleImageOptimization(request, {
         fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
         transformImage: async (body, { width, format, quality }) => {
-          const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
+          const imageFormat = format === "image/avif" || format === "image/webp" || format === "image/png" ? format : "image/jpeg";
+          const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format: imageFormat, quality });
           return result.response();
         },
       }, allowedWidths);
@@ -454,7 +406,7 @@ const worker = {
     }
 
     if (url.pathname === "/api/advisor") {
-      try { return await advisorApi(request, env); } catch (error) { return json({ error: error instanceof Error ? error.message : "Falha na análise" }, 500); }
+      return advisorApi(request, env, ownerOf(request));
     }
 
     if (url.pathname === "/api/backup") {

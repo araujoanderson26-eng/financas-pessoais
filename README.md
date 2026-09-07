@@ -85,16 +85,42 @@ Se você conectar um domínio próprio, proteja esse domínio também. Mantenha 
 
 O backend usa o e-mail autenticado pelo Access como proprietário dos registros. Requisições sem identidade recebem `401`.
 
-## 5. Análise com IA (opcional)
+## 5. Assistente IA com OpenAI
 
-Sem uma chave da OpenAI, a análise mensal continua funcionando no modo local, baseado em regras. Para habilitar respostas de IA no Worker:
+O assistente usa a Responses API da OpenAI. Não existe mais resposta pronta fingindo ser IA: falta de configuração, chave inválida, falta de créditos, limite de uso e falha de conexão aparecem na conversa.
+
+1. Na [plataforma OpenAI](https://platform.openai.com/api-keys), crie uma chave de API e habilite créditos/faturamento. O ChatGPT gratuito ou pago não inclui o consumo da API.
+2. No Cloudflare, abra **Workers & Pages > financas-pessoais > Settings > Variables and Secrets**.
+3. Adicione `OPENAI_API_KEY` como **Secret**, com sua chave. Nunca coloque a chave no código, no GitHub, em variáveis públicas ou no chat.
+4. Se houver um `OPENAI_MODEL` antigo, ajuste para `gpt-5.4-mini`, ou remova para usar esse padrão. Use outro modelo somente se sua conta tiver acesso e ele aceitar a Responses API.
+5. Salve e publique a configuração. No site, abra **Consultor IA** e envie uma pergunta. O indicador passa de **OpenAI configurada** para **OpenAI conectada** somente depois de uma resposta real.
+
+Alternativa pela CLI já autenticada:
 
 ```bash
 npx wrangler secret put OPENAI_API_KEY
-npx wrangler secret put OPENAI_MODEL
 ```
 
-No segundo comando, você pode informar `gpt-5.6` ou outro modelo compatível disponível na sua conta.
+A chave é solicitada de forma interativa. A lista de nomes pode ser verificada com `npx wrangler secret list`, sem revelar os valores. Não é necessário mudar o banco para esta integração.
+
+O backend calcula o contexto a partir dos registros D1 do usuário autenticado, sem aceitar totais enviados pelo navegador. Envia totais, categorias e comparação mensal, até 12 meses de evolução, maiores gastos, metas, orçamento, compromissos, carteira e patrimônio. O histórico da conversa é limitado e fica na memória da tela. A OpenAI recebe `store: false`. Os logs contêm códigos de falha, não chaves nem dados financeiros.
+
+Há um limite de seis perguntas por minuto por usuário por localidade Cloudflare; esse limite não substitui um teto de gastos na conta OpenAI. O site inteiro deve continuar protegido pelo Cloudflare Access, inclusive `/api/advisor` e o domínio `workers.dev`.
+
+### Alternativa sem chave da OpenAI
+
+No **Consultor IA**, escolha **Cloudflare AI** no seletor e envie sua pergunta. O binding `AI` já está declarado no projeto. Essa opção usa Llama 3.3, é identificada como **Cloudflare AI**, e não é o ChatGPT. Os dados só são enviados ao provedor escolhido ao enviar uma pergunta. A troca de provedor inicia uma nova conversa. Nenhum erro provoca troca silenciosa de provedor.
+
+O Workers AI tem cota diária gratuita, sujeita aos limites da conta; em contas pagas, o excedente pode ser cobrado. Consulte a [cota e os preços do Workers AI](https://developers.cloudflare.com/workers-ai/platform/pricing/). A opção OpenAI continua selecionada inicialmente. Para clientes diretos do endpoint que não indicam `?provider=`, `AI_PROVIDER=auto` usa a OpenAI quando há chave e Workers AI caso contrário; `AI_PROVIDER=cloudflare` força Workers AI.
+
+Validação da integração (sem consumir API, com banco SQLite temporário e provedores simulados):
+
+```bash
+npx wrangler types
+npx tsc --noEmit
+node --test tests/advisor.test.mjs tests/notifications.test.mjs
+npm run cf:dry-run
+```
 
 ## 6. Publicação automática pelo GitHub Actions
 

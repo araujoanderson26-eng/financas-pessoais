@@ -27,6 +27,9 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
+      - name: Validar assistente IA e alertas
+        run: node --test tests/advisor.test.mjs tests/notifications.test.mjs
+
       - name: Gerar aplicação
         run: npm run build:cloudflare
 

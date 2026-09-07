@@ -23,5 +23,9 @@
 	},
 	"observability": {
 		"enabled": true
-	}
+	},
+	"ratelimits": [
+		{ "name": "ADVISOR_RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 6, "period": 60 } }
+	],
+	"ai": { "binding": "AI" }
 }
