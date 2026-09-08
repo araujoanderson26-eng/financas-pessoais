@@ -152,8 +152,8 @@ test("explicit provider selection never falls back to a different provider", asy
 
 test("the default is a free-allowance model and the catalogue rejects arbitrary providers", () => {
   assert.equal(DEFAULT_ADVISOR_PROVIDER, "cloudflare");
-  assert.equal(CLOUDFLARE_MODELS.length, 3);
-  assert.equal(new Set(CLOUDFLARE_MODELS.map((option) => option.id)).size, 3);
+  assert.equal(CLOUDFLARE_MODELS.length, 4);
+  assert.equal(new Set(CLOUDFLARE_MODELS.map((option) => option.id)).size, 4);
   assert.ok(isAdvisorProvider("openai"));
   for (const value of [null, undefined, {}, "auto", "unknown", "@cf/custom/model", "https://attacker.example.test"]) assert.equal(isAdvisorProvider(value), false);
 });
@@ -198,6 +198,25 @@ for (const option of CLOUDFLARE_MODELS) {
     assert.equal(body.answer, undefined);
   });
 }
+
+test("GPT-OSS runs on Cloudflare without any OpenAI API key or API call", async (t) => {
+  const env = fixture(t);
+  delete env.OPENAI_API_KEY;
+  t.mock.method(globalThis, "fetch", async () => { assert.fail("GPT-OSS must use the existing Cloudflare AI binding"); });
+  env.AI = { run: async (model, input) => {
+    assert.equal(model, "@cf/openai/gpt-oss-20b");
+    assert.equal(input.max_tokens, 4096);
+    return { choices: [{ message: { role: "assistant", content: "Saldo mensal: R$ 600,00.", reasoning_content: "PRIVATE REASONING" }, finish_reason: "stop" }] };
+  } };
+  const input = new Request("https://finance.example.test/api/advisor?provider=cloudflare-gpt-oss", request());
+  const response = await advisorApi(input, env, owner);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.provider, "cloudflare");
+  assert.equal(body.model, "@cf/openai/gpt-oss-20b");
+  assert.equal(advisorLabel(body), "GPT-OSS 20B (OpenAI)");
+  assert.equal(body.answer, "Saldo mensal: R$ 600,00.");
+});
 
 test("Cloudflare output parser never exposes reasoning or treats truncated output as complete", () => {
   assert.equal(cloudflareAnswer({ response: "<think>private\nthoughts</think> Resposta final " }), "Resposta final");

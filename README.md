@@ -114,6 +114,7 @@ No **Consultor IA**, escolha um modelo no grupo **Cota gratuita compartilhada ·
 - **Llama 3.3 70B**: selecionado inicialmente; parâmetro `provider=cloudflare`.
 - **Qwen3 30B**: parâmetro `provider=cloudflare-qwen`.
 - **Mistral Small 3.1**: parâmetro `provider=cloudflare-mistral`.
+- **GPT-OSS 20B (OpenAI)**: parâmetro `provider=cloudflare-gpt-oss`. Modelo aberto da OpenAI hospedado na Cloudflare, sem assinatura, chave ou créditos da API OpenAI. Não é o ChatGPT.
 
 O binding `AI` já está declarado no projeto. Não é necessário criar novas chaves ou contas para esses modelos. Eles são executados no Workers AI, não são o ChatGPT e aparecem identificados pelo nome nas respostas. A opção OpenAI fica separada no grupo **API paga**.
 
@@ -121,7 +122,7 @@ Todos compartilham a mesma cota de 10.000 neurons por dia da conta Cloudflare; t
 
 Os dados só são enviados ao provedor escolhido ao enviar uma pergunta. A troca de modelo inicia uma nova conversa. Nenhum erro provoca troca silenciosa de provedor. As respostas usam apenas o texto final, sem exibir os blocos de raciocínio dos modelos.
 
-Para clientes diretos do endpoint que não indicam `?provider=`, `AI_PROVIDER=auto` usa a OpenAI quando há chave e Llama caso contrário; `AI_PROVIDER=cloudflare`, `cloudflare-qwen` ou `cloudflare-mistral` seleciona o modelo correspondente. Sem configuração, o padrão do endpoint continua sendo OpenAI por compatibilidade; a interface sempre envia o modelo escolhido.
+Para clientes diretos do endpoint que não indicam `?provider=`, `AI_PROVIDER=auto` usa a OpenAI quando há chave e Llama caso contrário; `AI_PROVIDER=cloudflare`, `cloudflare-qwen`, `cloudflare-mistral` ou `cloudflare-gpt-oss` seleciona o modelo correspondente. Sem configuração, o padrão do endpoint continua sendo OpenAI por compatibilidade; a interface sempre envia o modelo escolhido.
 
 Validação da integração (sem consumir API, com banco SQLite temporário e provedores simulados):
 
