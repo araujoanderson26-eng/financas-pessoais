@@ -1,187 +1,153 @@
 # Nexo Finanças Pessoais
 
-Aplicação pessoal de gestão financeira com visão executiva, analytics, planejamento, relatórios e exportações profissionais. A produção usa o Worker existente `financas-pessoais` e o D1 existente `financas-pessoais-db`.
+Módulo independente de finanças pessoais em preparação para o **Portal Gestão Comercial**. Mantém a identidade Nexo, o Worker `financas-pessoais` e o D1 `financas-pessoais-db`. A integração com os outros módulos não foi realizada.
 
-## O que está incluído
+Documentação complementar: [revisão técnica](REVISAO.md) e [integração futura](INTEGRACAO_PORTAL.md).
 
-- Dashboard executivo com score de saúde financeira, reserva, projeção, alertas, insights e comparações
-- Fluxo de caixa, evolução patrimonial por snapshots, despesas por categoria e orçado × realizado
-- Movimentações com filtros combináveis, busca, ordenação, resumos e paginação responsiva
-- Planejamento com contas, cartões, metas, recorrências, orçamentos e parcelamentos futuros
-- Patrimônio, investimentos e assinaturas com indicadores e análises consolidadas
-- Configurações persistidas, temas claro/escuro/sistema, densidade e ocultação de valores
-- Relatório mensal A4 e exportações `.xlsx` com identidade Nexo, filtros, totais e cabeçalho congelado
-- React 19, Vinext, TypeScript, Recharts, ExcelJS, Cloudflare Workers e D1
-- Workflow do GitHub Actions que aplica migrations incrementais e publica na `main`
+## Funcionalidades
 
-## Requisitos
+- Dashboard com indicadores, comparação mensal, projeções, orçamento, reserva e alertas calculados dos registros.
+- Movimentações com cadastro, edição, arquivamento, parcelamento, filtros, pesquisa, ordenação e paginação.
+- Categorias com edição, verificação de referências, exclusão e substituição.
+- Planejamento de contas, cartões, metas, orçamentos e parcelas futuras.
+- Patrimônio e investimentos com posições manuais, edição, exclusão e composição.
+- Assinaturas com cadastro, filtros, vencimentos estimados e arquivamento.
+- Relatório mensal, observações persistidas, Excel e impressão/PDF pelo navegador.
+- Histórico de movimentações, snapshots, backup JSON e Excel completo com 11 abas.
+- Perfil visual, tema, densidade, privacidade visual e preferências de exportação persistidos.
+- Consultor integrado à OpenAI/Workers AI, com contexto do D1 e erros explícitos.
 
-- Node.js 22.13 ou superior
-- Uma conta Cloudflare
-- Git e uma conta GitHub
+Não há dados financeiros demonstrativos injetados na interface. As categorias iniciais são configuração de partida; dados simulados ficam nos testes. Contas, metas, saldos, rentabilidade e patrimônio são informados manualmente. Não há conexão com bancos, corretoras ou cotações.
 
-## 1. Executar localmente
+Recorrências classificam lançamentos e assinaturas estimam compromissos, sem gerar cobranças automaticamente. Parcelamento cria parcelas reais no D1. Contas/metas ainda não possuem edição na interface. A importação de movimentações existe na API; não há importador de arquivos nem restauração integral de backup na interface.
 
-```bash
+## Arquitetura e runtime
+
+React 19 e TypeScript na interface; Vinext 0.0.50 sobre Vite 8, com APIs compatíveis com Next.js 16; runtime Cloudflare Workers com `nodejs_compat`; D1/SQLite para persistência; Drizzle para schema/migrations; Recharts, Lucide, ExcelJS e jose. As versões reproduzíveis estão em `package-lock.json`.
+
+Fluxo: `app/page.tsx` → componentes/hooks → API → identidade/permissões → serviço financeiro → D1. Cálculos ficam em `lib/finance`; exportações em `lib/excel`. Queries usam parâmetros vinculados e `owner` obtido da identidade verificada.
+
+```text
+app/                       entrada, layout, CSS e fallback de erro
+components/                telas, formulários, shell e componentes compartilhados
+hooks/                     sincronização, navegação e foco de diálogos
+lib/finance/               contratos, cálculos e CSV
+lib/excel/                 exportações Excel
+lib/ai/                    contratos/modelos de IA
+worker/index.ts            roteamento e autorização
+worker/identity.ts         adaptador de identidade e Principal
+worker/finance.ts          persistência e operações financeiras
+worker/validation.ts       validação e parcelamento
+worker/http.ts             corpo limitado e erros HTTP
+worker/advisor.ts          contexto e provedores IA
+db/schema.ts               schema Drizzle
+drizzle/                   migrations e snapshots
+tests/                     regressões com SQLite, JWT e Excel
+scripts/                   build, artefato e auditoria SQL
+build/                     plugin Sites preservado
+.github/workflows/         validação e publicação Cloudflare
+wrangler.jsonc             runtime, bindings e banco existente
+```
+
+O destino atual é Workers, não Pages. `.openai/hosting.json` e o plugin Sites de empacotamento foram preservados. Não substitua o `database_id` nem crie recursos paralelos ao publicar este módulo.
+
+## Instalação e execução local
+
+Requisito: Node.js **22.13 ou superior** e npm. Os testes utilizam SQLite do Node.
+
+```sh
 npm ci
+npm run cf:types
+npm run cf:migrate:local
 npm run dev
 ```
 
-Abra o endereço exibido no terminal. No ambiente local, o aplicativo usa uma identidade de desenvolvimento. O D1 local é mantido pela ferramenta da Cloudflare.
+Abra `http://127.0.0.1:5173` ou a porta exibida. Os comandos npm funcionam em Windows/Linux/macOS sem Bash. O D1 local fica em `.wrangler/`, separado da produção; não apague essa pasta se precisar preservar seus dados locais.
 
-Para habilitar a análise com IA localmente, copie o exemplo e preencha a chave:
+Somente o Vite de desenvolvimento injeta `LOCAL_DEV_AUTH=true`. O Worker aceita essa identidade apenas em host loopback (`owner@local`). O build não injeta a flag; nunca a configure em produção.
 
-```bash
-cp .dev.vars.example .dev.vars
+Para configuração local opcional, copie `.dev.vars.example` para `.dev.vars`. No PowerShell:
+
+```powershell
+Copy-Item .dev.vars.example .dev.vars
 ```
 
-Nunca envie `.dev.vars` ao GitHub.
+O desenvolvimento padrão desabilita bindings remotos. Para testar Workers AI real, autentique Wrangler e inicie o processo com `FINANCE_REMOTE_AI=true`; isso usa a conta/cota Cloudflare. Uma chave OpenAI real também pode gerar consumo ao enviar perguntas. Os testes automatizados não precisam de provedores externos.
 
-## 2. Repositório e infraestrutura existentes
+## Variáveis e bindings
 
-Não crie recursos paralelos. Este código evolui exclusivamente:
+| Nome | Uso |
+| --- | --- |
+| `DB` | D1 obrigatório `financas-pessoais-db`, configurado em `wrangler.jsonc` |
+| `ASSETS`, `IMAGES` | Assets do build e otimização de imagens |
+| `ACCESS_TEAM_DOMAIN` | Obrigatório em produção: `equipe.cloudflareaccess.com`, sem protocolo/caminho |
+| `ACCESS_AUD` | Obrigatório em produção: Application Audience da aplicação Access |
+| `LOCAL_DEV_AUTH` | Exclusivo do desenvolvimento loopback; injetado por Vite |
+| `OPENAI_API_KEY` | Secret opcional, necessário para o provedor OpenAI |
+| `OPENAI_MODEL` | Padrão atual do código: `gpt-5.4-mini`; exige acesso ao modelo na conta |
+| `AI_PROVIDER` | Padrão do endpoint `openai`; opções `auto`, `cloudflare`, `cloudflare-qwen`, `cloudflare-mistral`, `cloudflare-gpt-oss` |
+| `AI` | Binding Workers AI; modelos em `lib/ai/models.ts` |
+| `ADVISOR_RATE_LIMITER` | Seis perguntas/minuto por proprietário e localidade Cloudflare |
+| `FINANCE_REMOTE_AI` | Variável do processo Vite para permitir bindings remotos |
+| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | Secrets do GitHub Actions para publicar |
 
-- GitHub: `araujoanderson26-eng/financas-pessoais`
-- Branch: `main`
-- Worker: `financas-pessoais`
-- D1: `financas-pessoais-db`
-- URL: `financas-pessoais.araujo-anderson26.workers.dev`
+Não versione `.dev.vars`, chaves ou tokens. Nenhum segredo deve entrar em variáveis públicas do cliente.
 
-O `database_id` em `wrangler.jsonc` é parte da configuração versionada e não deve ser substituído.
+## Autenticação e permissões
 
-## 3. Validar e publicar
+Proteja todos os domínios do Worker com Cloudflare Access, inclusive endereços alternativos `workers.dev`. Configure a política de usuários e as variáveis `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` no Worker **antes de publicar esta revisão**. Confirme a persistência das variáveis no ambiente de deploy escolhido.
 
-Autentique a CLI:
+O servidor verifica `cf-access-jwt-assertion`: assinatura RS256/JWKS, emissor, audiência, expiração e identidade. E-mail em cabeçalho isolado e cabeçalhos OAI legados não concedem acesso. Falta de configuração retorna `503`; token ausente/inválido retorna `401`, sem fallback público. O `owner` permanece o e-mail verificado para preservar os registros existentes.
 
-```bash
-npx wrangler login
+O adaptador retorna `Principal` com `subject`, `owner` e escopos `finance:read`, `finance:write`, `finance:export`, `finance:advisor`. Usuários admitidos pelo Access recebem esses escopos apenas sobre seus próprios dados. Não há administração global, cadastro paralelo de senhas ou RBAC do Portal implantado. A autorização é checada no Worker; o futuro Portal fornecerá identidade estável e mapeamento de perfis.
+
+## Banco e backup
+
+Tabelas: `categories`, `transactions`, `investments`, `accounts`, `budgets`, `goals`, `wealth_items`, `subscriptions`, `transaction_events`, `monthly_notes`, `user_settings`, `financial_snapshots`, `backup_events`. Wrangler mantém adicionalmente seu controle de migrations.
+
+Migrations `0000`…`0004` foram preservadas. `0005_module_integrity.sql` acrescenta índices, proteção de referências/duplicidades e auditoria transacional. `0006_category_cascade.sql` propaga alterações de categorias e impede macros inconsistentes. Não apagam dados antigos. Duplicidades legadas, se encontradas, precisam de conciliação explícita.
+
+```sh
+npx wrangler d1 migrations list DB --remote
+npx wrangler d1 execute DB --local --file scripts/db-audit.sql
 ```
 
-Antes de publicar, valide o pacote e aplique somente migrations incrementais:
+O script de auditoria contém somente SELECTs. Também pode ser executado remotamente; para obter resultados tabulares remotos, envie as consultas via `--command`, pois `--file` pode retornar só um resumo.
 
-```bash
+Backup JSON exporta todas as tabelas do proprietário em batch consistente, incluindo arquivados. Excel não é formato de restauração. O histórico registra geração/solicitação de exportação, sem comprovar salvamento no disco. Antes de migrations remotas, faça também backup administrativo do D1 ou registre ponto de recuperação. Não use rollback SQL destrutivo para reverter código.
+
+## Build, testes e deploy
+
+```sh
+npm run cf:types
+npm run typecheck
 npm run lint
 npm test
-npm run cf:dry-run
+npx wrangler deploy --dry-run
+```
+
+`npm test` gera build, valida o Worker e executa a suíte. `npm run cf:dry-run` refaz o build e simula o pacote. Artefatos: `dist/server/index.js` e `dist/client`. Os scripts `.sh` antigos foram mantidos por compatibilidade; os comandos npm usam Node.
+
+Publicação deliberada, após configurar Access, revisar backup e concluir os testes:
+
+```sh
+npx wrangler login
 npm run cf:migrate
-npx wrangler deploy
+npm run cf:deploy
 ```
 
-O terminal mostrará a URL `*.workers.dev` ao concluir.
+Os dois últimos comandos **alteram produção** e não foram executados nesta revisão. `cf:deploy` não aplica migrations: preserve a ordem. Na primeira liberação desta revisão, suspenda gravações durante migrations/deploy: a versão antiga ainda registra eventos pela API e pode duplicá-los enquanto coexistir com os novos triggers de auditoria. O workflow valida tipos/lint/build/testes antes de migrations e deploy em push na `main` ou disparo manual. Sem secrets ele informa que não publicou. O token de CI precisa das permissões apropriadas de Workers e D1.
 
-## 4. Proteger os dados com Cloudflare Access
+## IA, exportações e limites conhecidos
 
-Este aplicativo contém dados financeiros pessoais. **Configure o Cloudflare Access antes de cadastrar dados reais.**
+O consultor envia dados ao provedor selecionado quando uma pergunta é enviada; não executa transações. Contexto vem do D1 do proprietário. Histórico limitado permanece na memória da tela; OpenAI recebe `store:false`. Status configurado não comprova resposta real. Não existe troca silenciosa de provedor. Modelos Workers AI compartilham limites da conta; não se promete gratuidade ilimitada.
 
-No painel Cloudflare Zero Trust:
+CSV protege texto contra fórmulas; Excel grava descrições como texto, usa filtros sobre as linhas reais e respeita proprietário/assinatura. Ocultação visual não anonimiza backup/exportação nem representa controle de acesso.
 
-1. Abra **Access > Applications** e crie uma aplicação **Self-hosted**.
-2. Informe o domínio completo do Worker publicado.
-3. Crie uma política **Allow** limitada ao seu e-mail.
-4. Use seu provedor de identidade ou o método **One-time PIN**.
-5. Teste em uma janela anônima: o painel só deve abrir depois do login.
-
-Se você conectar um domínio próprio, proteja esse domínio também. Mantenha o endereço `workers.dev` coberto pelo Access ou desative-o, para que não exista uma rota pública alternativa.
-
-O backend usa o e-mail autenticado pelo Access como proprietário dos registros. Requisições sem identidade recebem `401`.
-
-## 5. Assistente IA com OpenAI
-
-O assistente usa a Responses API da OpenAI. Não existe mais resposta pronta fingindo ser IA: falta de configuração, chave inválida, falta de créditos, limite de uso e falha de conexão aparecem na conversa.
-
-1. Na [plataforma OpenAI](https://platform.openai.com/api-keys), crie uma chave de API e habilite créditos/faturamento. O ChatGPT gratuito ou pago não inclui o consumo da API.
-2. No Cloudflare, abra **Workers & Pages > financas-pessoais > Settings > Variables and Secrets**.
-3. Adicione `OPENAI_API_KEY` como **Secret**, com sua chave. Nunca coloque a chave no código, no GitHub, em variáveis públicas ou no chat.
-4. Se houver um `OPENAI_MODEL` antigo, ajuste para `gpt-5.4-mini`, ou remova para usar esse padrão. Use outro modelo somente se sua conta tiver acesso e ele aceitar a Responses API.
-5. Salve e publique a configuração. No site, abra **Consultor IA**, selecione **OpenAI** e envie uma pergunta. O indicador passa de **OpenAI · configurado** para **OpenAI · conectado** somente depois de uma resposta real.
-
-Alternativa pela CLI já autenticada:
-
-```bash
-npx wrangler secret put OPENAI_API_KEY
-```
-
-A chave é solicitada de forma interativa. A lista de nomes pode ser verificada com `npx wrangler secret list`, sem revelar os valores. Não é necessário mudar o banco para esta integração.
-
-O backend calcula o contexto a partir dos registros D1 do usuário autenticado, sem aceitar totais enviados pelo navegador. Envia totais, categorias e comparação mensal, até 12 meses de evolução, maiores gastos, metas, orçamento, compromissos, carteira e patrimônio. O histórico da conversa é limitado e fica na memória da tela. A OpenAI recebe `store: false`. Os logs contêm códigos de falha, não chaves nem dados financeiros.
-
-Há um limite de seis perguntas por minuto por usuário por localidade Cloudflare; esse limite não substitui um teto de gastos na conta OpenAI. O site inteiro deve continuar protegido pelo Cloudflare Access, inclusive `/api/advisor` e o domínio `workers.dev`.
-
-### Opções com cota gratuita, sem chave da OpenAI
-
-No **Consultor IA**, escolha um modelo no grupo **Cota gratuita compartilhada · sem chave extra**:
-
-- **Llama 3.3 70B**: selecionado inicialmente; parâmetro `provider=cloudflare`.
-- **Qwen3 30B**: parâmetro `provider=cloudflare-qwen`.
-- **Mistral Small 3.1**: parâmetro `provider=cloudflare-mistral`.
-- **GPT-OSS 20B (OpenAI)**: parâmetro `provider=cloudflare-gpt-oss`. Modelo aberto da OpenAI hospedado na Cloudflare, sem assinatura, chave ou créditos da API OpenAI. Não é o ChatGPT.
-
-O binding `AI` já está declarado no projeto. Não é necessário criar novas chaves ou contas para esses modelos. Eles são executados no Workers AI, não são o ChatGPT e aparecem identificados pelo nome nas respostas. A opção OpenAI fica separada no grupo **API paga**.
-
-Todos compartilham a mesma cota de 10.000 neurons por dia da conta Cloudflare; trocar de modelo não renova a cota. No plano gratuito, novas solicitações param quando a cota acaba. Em contas pagas, o excedente pode ser cobrado. O consumo varia por modelo e tamanho da conversa. Consulte a [cota e os preços do Workers AI](https://developers.cloudflare.com/workers-ai/platform/pricing/).
-
-Os dados só são enviados ao provedor escolhido ao enviar uma pergunta. A troca de modelo inicia uma nova conversa. Nenhum erro provoca troca silenciosa de provedor. As respostas usam apenas o texto final, sem exibir os blocos de raciocínio dos modelos.
-
-Para clientes diretos do endpoint que não indicam `?provider=`, `AI_PROVIDER=auto` usa a OpenAI quando há chave e Llama caso contrário; `AI_PROVIDER=cloudflare`, `cloudflare-qwen`, `cloudflare-mistral` ou `cloudflare-gpt-oss` seleciona o modelo correspondente. Sem configuração, o padrão do endpoint continua sendo OpenAI por compatibilidade; a interface sempre envia o modelo escolhido.
-
-Validação da integração (sem consumir API, com banco SQLite temporário e provedores simulados):
-
-```bash
-npx wrangler types
-npx tsc --noEmit
-node --test tests/advisor.test.mjs tests/notifications.test.mjs
-npm run cf:dry-run
-```
-
-## 6. Publicação automática pelo GitHub Actions
-
-O workflow `.github/workflows/deploy-cloudflare.yml` publica todo push na branch `main`. No repositório, abra **Settings > Secrets and variables > Actions** e crie:
-
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_API_TOKEN`
-
-O token deve ter, no mínimo, permissões para editar Workers Scripts e D1. O banco precisa ter sido criado e o `database_id` precisa estar versionado no `wrangler.jsonc` antes de executar o workflow.
-
-Depois disso, um novo push em `main` executará migrações e publicará o Worker. Também é possível iniciar manualmente em **Actions > Publicar na Cloudflare > Run workflow**.
-
-## Comandos úteis
-
-```bash
-npm run cf:dry-run       # gera e valida o pacote sem publicar
-npm run cf:migrate       # aplica migrações no D1 remoto
-npm run cf:deploy        # gera e publica manualmente
-npx wrangler tail        # acompanha logs do Worker
-npx wrangler versions list
-```
-
-## Estrutura principal
-
-```text
-app/                     interface e rotas da aplicação
-components/              módulos de produto e componentes compartilhados
-hooks/                   sincronização e preferências da interface
-lib/finance/             cálculos e modelos financeiros
-lib/excel/               exportações profissionais em Excel
-lib/formatters/          moeda, datas, meses e percentuais
-worker/index.ts          APIs, autenticação e entrada do Worker
-db/                      schema e acesso ao D1
-drizzle/                 migrações versionadas do banco
-.github/workflows/       publicação automática
-wrangler.jsonc           configuração da Cloudflare
-```
-
-## Backup e recuperação
-
-- A interface oferece exportação dos dados do usuário.
-- O backup JSON inclui configurações, snapshots e histórico de exportações.
-- O Excel completo reúne 11 abas e não altera o banco.
-- Antes de alterações importantes, exporte um backup pela aplicação.
-- Para restaurar uma versão do código, use o histórico do Git e publique novamente.
-- Para acompanhar publicações e versões do Worker, use `npx wrangler versions list`.
-
-## Observações de segurança
-
-- Não coloque chaves, tokens ou arquivos `.dev.vars` no repositório.
-- Restrinja o acesso ao GitHub e à conta Cloudflare.
-- Ative autenticação de dois fatores nas duas contas.
-- Não remova a proteção de identidade de `worker/index.ts`.
+- Access em produção e provedores reais de IA ainda precisam de validação operacional; os testes utilizam JWT/provedores isolados.
+- Paginação é local e a API carrega o conjunto financeiro do proprietário. A tela limita eventos a 300, backups a 20 e snapshots aos 730 registros mais recentes; JSON completo não usa esses limites.
+- Snapshots são posições observadas ao abrir/atualizar a aplicação. Não há reconstrução retroativa. Reserva usa heurística de nome/tipo, sem certificar liquidez.
+- Cadastrar o mesmo bem em conta/carteira/patrimônio pode causar sobreposição. Não houve alteração arbitrária dessa regra de composição.
+- Valores continuam `REAL` no D1 por compatibilidade. Entradas são validadas em centavos e parcelas preservam o total; eventual migração para inteiros exige conciliação.
+- `npm audit` em 08/09/2026 aponta oito ocorrências transitivas (duas altas, seis moderadas). Veja exposição e decisões em `REVISAO.md`.
+- Integração do Portal, restore, cobranças automáticas, edição de contas/metas, idempotência de reenvios e auditoria administrativa completa são trabalhos posteriores.

@@ -1,5 +1,6 @@
 "use client";
 
+import { useDialogFocus } from "@/hooks/useDialogFocus";
 import type { LucideIcon } from "lucide-react";
 import { AlertTriangle, Check, ChevronDown, Download, Inbox, LoaderCircle, Trash2, X } from "lucide-react";
 import { formatPrivateCurrency, formatPercent } from "@/lib/formatters";
@@ -85,7 +86,7 @@ export function EmptyState({
 
 export function ProgressBar({ value, tone = "positive", label }: { value: number; tone?: Tone; label?: string }) {
   const safeValue = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
-  return <div className="progress-stack">{label && <div className="progress-label"><span>{label}</span><strong>{formatPercent(safeValue)}</strong></div>}<div className={`progress-bar tone-${tone}`} role="progressbar" aria-valuenow={safeValue} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${safeValue}%` }} /></div></div>;
+  return <div className="progress-stack">{label && <div className="progress-label"><span>{label}</span><strong>{formatPercent(safeValue)}</strong></div>}<div className={`progress-bar tone-${tone}`} role="progressbar" aria-label={label || "Progresso"} aria-valuenow={safeValue} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${safeValue}%` }} /></div></div>;
 }
 
 export function StatusBadge({ tone = "neutral", children }: { tone?: Tone; children: React.ReactNode }) {
@@ -124,6 +125,7 @@ export function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const dialogRef = useDialogFocus(open, onCancel);
   if (!open) return null;
-  return <div className="modal-backdrop" role="presentation"><div className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title"><span className={danger ? "danger" : "attention"}>{danger ? <Trash2 /> : <AlertTriangle />}</span><h2 id="confirm-title">{title}</h2><p>{description}</p><div><button className="secondary-button" onClick={onCancel}>Cancelar</button><button className={danger ? "danger-button" : "primary-button"} onClick={onConfirm}>{confirmLabel}</button></div></div></div>;
+  return <div className="modal-backdrop" role="presentation"><div ref={dialogRef} tabIndex={-1} className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title"><span className={danger ? "danger" : "attention"}>{danger ? <Trash2 /> : <AlertTriangle />}</span><h2 id="confirm-title">{title}</h2><p>{description}</p><div><button className="secondary-button" onClick={onCancel}>Cancelar</button><button className={danger ? "danger-button" : "primary-button"} onClick={onConfirm}>{confirmLabel}</button></div></div></div>;
 }

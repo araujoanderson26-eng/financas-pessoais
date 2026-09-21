@@ -1,4 +1,8 @@
-# Opcional: sem esta chave, o consultor usa a análise financeira local.
+# Produção exige domínio da equipe (sem https://) e Application Audience do Access.
+# Configure estes valores nas variáveis do Worker antes do deploy.
+ACCESS_TEAM_DOMAIN=
+ACCESS_AUD=
+# Opcional. Sem provedor configurado, o consultor informa indisponibilidade.
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5.4-mini
 # openai requires an API key and available API credits. ChatGPT plans are separate.
