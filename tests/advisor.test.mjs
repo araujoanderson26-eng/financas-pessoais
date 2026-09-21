@@ -33,6 +33,9 @@ function fixture(t) {
   const db = new DatabaseSync(":memory:");
   t.after(() => db.close());
   for (const file of readdirSync(resolve(root, "drizzle")).filter((name) => name.endsWith(".sql")).sort()) db.exec(readFileSync(resolve(root, "drizzle", file), "utf8"));
+  for (const who of [owner, "another@example.test"]) {
+    for (const [name, macro] of [["Moradia", "Fixo"], ["Salário", "Receita"], ["Outros", "Variável"]]) db.prepare("INSERT INTO categories(owner,name,macro) VALUES(?,?,?)").run(who,name,macro);
+  }
   const insert = db.prepare("INSERT INTO transactions (owner,date,description,category,macro,type,value,archived_at) VALUES (?,?,?,?,?,?,?,?)");
   for (const row of [
     [owner,"2026-08-01","Aluguel anterior","Moradia","Fixo","saida",100,null],

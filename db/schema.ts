@@ -1,11 +1,12 @@
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { index, uniqueIndex, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const categories = sqliteTable("categories", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   owner: text("owner").notNull(),
   name: text("name").notNull(),
   macro: text("macro").notNull(),
-});
+}, table => [index("categories_lookup_0").on(table.owner, sql`${table.name} COLLATE NOCASE`)]);
 
 export const transactions = sqliteTable("transactions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -21,7 +22,7 @@ export const transactions = sqliteTable("transactions", {
   installmentCurrent: integer("installment_current").notNull().default(1),
   installmentTotal: integer("installment_total").notNull().default(1),
   archivedAt: text("archived_at"),
-});
+}, table => [index("transactions_lookup_0").on(table.owner, table.date), index("transactions_lookup_1").on(table.owner, table.category), index("transactions_lookup_2").on(table.owner, table.account)]);
 
 export const accounts = sqliteTable("accounts", {
   id: integer("id").primaryKey({ autoIncrement: true }), owner: text("owner").notNull(),
@@ -31,24 +32,24 @@ export const accounts = sqliteTable("accounts", {
   institution: text("institution").notNull().default(""),
   closingDay: integer("closing_day").notNull().default(0),
   dueDay: integer("due_day").notNull().default(0),
-});
+}, table => [index("accounts_lookup_0").on(table.owner, table.name)]);
 
 export const budgets = sqliteTable("budgets", {
   id: integer("id").primaryKey({ autoIncrement: true }), owner: text("owner").notNull(),
   month: text("month").notNull(), category: text("category").notNull(), amount: real("amount").notNull(),
-});
+}, table => [index("budgets_lookup_0").on(table.owner, table.month, table.category)]);
 
 export const goals = sqliteTable("goals", {
   id: integer("id").primaryKey({ autoIncrement: true }), owner: text("owner").notNull(),
   name: text("name").notNull(), target: real("target").notNull(), current: real("current").notNull().default(0),
   deadline: text("deadline").notNull(),
-});
+}, table => [index("goals_lookup_0").on(table.owner)]);
 
 export const wealthItems = sqliteTable("wealth_items", {
   id: integer("id").primaryKey({ autoIncrement: true }), owner: text("owner").notNull(),
   name: text("name").notNull(), kind: text("kind").notNull(), group: text("group_name").notNull(), value: real("value").notNull(),
   remainingDebt: real("remaining_debt").notNull().default(0),
-});
+}, table => [index("wealth_items_lookup_0").on(table.owner)]);
 
 export const investments = sqliteTable("investments", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -57,7 +58,7 @@ export const investments = sqliteTable("investments", {
   type: text("type").notNull(),
   value: real("value").notNull(),
   returnPct: real("return_pct").notNull().default(0),
-});
+}, table => [index("investments_lookup_0").on(table.owner)]);
 
 export const subscriptions = sqliteTable("subscriptions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -68,7 +69,7 @@ export const subscriptions = sqliteTable("subscriptions", {
   value: real("value").notNull(),
   billingDay: integer("billing_day").notNull().default(1),
   status: text("status").notNull().default("Ativa"),
-});
+}, table => [index("subscriptions_lookup_0").on(table.owner, table.category), index("subscriptions_lookup_1").on(table.owner, table.account)]);
 
 export const transactionEvents = sqliteTable("transaction_events", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -77,7 +78,7 @@ export const transactionEvents = sqliteTable("transaction_events", {
   action: text("action").notNull(),
   snapshot: text("snapshot").notNull(),
   createdAt: text("created_at").notNull(),
-});
+}, table => [index("transaction_events_lookup_0").on(table.owner, table.id)]);
 
 export const monthlyNotes = sqliteTable("monthly_notes", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -85,7 +86,7 @@ export const monthlyNotes = sqliteTable("monthly_notes", {
   month: text("month").notNull(),
   note: text("note").notNull().default(""),
   updatedAt: text("updated_at").notNull(),
-});
+}, table => [index("monthly_notes_lookup_0").on(table.owner, table.month)]);
 
 export const userSettings = sqliteTable("user_settings", {
   owner: text("owner").primaryKey(),
@@ -118,11 +119,11 @@ export const financialSnapshots = sqliteTable("financial_snapshots", {
   investments: real("investments").notNull().default(0),
   emergencyReserve: real("emergency_reserve").notNull().default(0),
   createdAt: text("created_at").notNull(),
-});
+}, table => [uniqueIndex("financial_snapshots_owner_date_unique").on(table.owner, table.snapshotDate)]);
 
 export const backupEvents = sqliteTable("backup_events", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   owner: text("owner").notNull(),
   kind: text("kind").notNull(),
   createdAt: text("created_at").notNull(),
-});
+}, table => [index("backup_events_owner_created_idx").on(table.owner, table.createdAt)]);

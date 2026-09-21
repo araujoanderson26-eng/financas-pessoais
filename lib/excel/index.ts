@@ -15,8 +15,8 @@ function safeSheetName(value: string) { return value.replace(/[\\/*?:[\]]/g, " "
 function addMetadata(sheet: Worksheet, reportName: string, period: string, settings: UserSettings, lastColumn: number, filters: string[] = []) {
   const owner = settings.exportOwner ? settings.profileName : "";
   const values = [
-    settings.exportIdentity ? "NEXO FINANÇAS PESSOAIS" : settings.productName,
-    settings.exportIdentity ? settings.signature : owner,
+    settings.exportIdentity ? settings.productName : "",
+    [settings.exportIdentity ? settings.signature : "", owner].filter(Boolean).join(" · "),
     reportName,
     period,
     settings.exportGeneratedAt ? `Gerado em ${fileTimestamp()}` : "",
@@ -76,7 +76,7 @@ function addDataSheet(workbook: Workbook, name: string, reportName: string, peri
     row.getCell(1).alignment = { vertical: "middle", horizontal: "left" };
     row.height = 24;
   }
-  sheet.autoFilter = { from: { row: 8, column: 1 }, to: { row: 8, column: columns.length } };
+  sheet.autoFilter = { from: { row: 8, column: 1 }, to: { row: 8 + rows.length, column: columns.length } };
   if (settings.exportTotals && options.totals) {
     const totalRowNumber = 10 + Math.max(1, rows.length);
     const totalRow = sheet.getRow(totalRowNumber);
@@ -91,7 +91,7 @@ function addDataSheet(workbook: Workbook, name: string, reportName: string, peri
     });
   }
   sheet.pageSetup = { paperSize: 9, orientation: columns.length > 7 ? "landscape" : "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } };
-  sheet.headerFooter = { oddFooter: `Nexo Finanças Pessoais — ${settings.signature} &R Página &P de &N` };
+  sheet.headerFooter = { oddFooter: `${settings.exportIdentity ? settings.productName : ""} ${settings.exportOwner ? settings.profileName : ""} &R Página &P de &N` };
   return sheet;
 }
 
@@ -100,7 +100,7 @@ async function createWorkbook() {
   const Excel = excelModule.default ?? excelModule;
   const workbook = new Excel.Workbook();
   workbook.creator = "Nexo Finanças Pessoais";
-  workbook.company = "Anderson de Araujo";
+  workbook.company = "";
   workbook.created = new Date();
   workbook.modified = new Date();
   workbook.calcProperties.fullCalcOnLoad = true;
@@ -143,14 +143,14 @@ function addPlanningSheets(workbook:Workbook,context:ExportContext,includeCommit
   addDataSheet(workbook,"Contas","Planejamento — Contas",period,[{header:"Conta",key:"name",width:28},{header:"Tipo",key:"type",width:20},{header:"Escopo",key:"scope",width:10},{header:"Instituição",key:"institution",width:24},{header:"Saldo",key:"balance",width:18,format:"currency"}],data.accounts.filter((item)=>item.type!=="Cartão de crédito"),settings,{totals:{institution:"TOTAL",balance:analytics.accountBalance}});
   addDataSheet(workbook,"Cartões","Planejamento — Cartões",period,[{header:"Cartão",key:"name",width:28},{header:"Instituição",key:"institution",width:24},{header:"Escopo",key:"scope",width:10},{header:"Limite",key:"creditLimit",width:18,format:"currency"},{header:"Fechamento",key:"closingDay",width:13,format:"number"},{header:"Vencimento",key:"dueDay",width:13,format:"number"}],data.accounts.filter((item)=>item.type==="Cartão de crédito"),settings);
   addDataSheet(workbook,"Metas","Planejamento — Metas",period,[{header:"Meta",key:"name",width:30},{header:"Valor alvo",key:"target",width:18,format:"currency"},{header:"Acumulado",key:"current",width:18,format:"currency"},{header:"Faltante",key:"missing",width:18,format:"currency"},{header:"Prazo",key:"deadline",width:15}],data.goals.map((item)=>({...item,missing:Math.max(0,item.target-item.current),deadline:formatDate(item.deadline)})),settings);
-  if(includeCommitments){const recurring=[...data.transactions.filter((item)=>item.recurrence&&item.recurrence!=="Não").map((item)=>({name:item.description,category:item.category,account:item.account,value:item.value,frequency:item.recurrence,source:"Movimentação"})),...data.subscriptions.filter((item)=>item.status==="Ativa").map((item)=>({name:item.name,category:item.category,account:item.account,value:item.value,frequency:"Mensal",source:"Assinatura"}))];
-  addDataSheet(workbook,"Recorrências","Planejamento — Recorrências",period,[{header:"Descrição",key:"name",width:32},{header:"Categoria",key:"category",width:20},{header:"Conta",key:"account",width:22},{header:"Valor",key:"value",width:18,format:"currency"},{header:"Frequência",key:"frequency",width:15},{header:"Origem",key:"source",width:16}],recurring,settings,{totals:{account:"TOTAL MENSAL",value:analytics.recurringCommitment}});
+  if(includeCommitments){const recurring=[...data.transactions.filter((item)=>item.date.startsWith(month)&&item.type==="saida"&&item.recurrence==="Mensal").map((item)=>({name:item.description,category:item.category,account:item.account,value:item.value,frequency:item.recurrence,source:"Movimentação"})),...data.subscriptions.filter((item)=>item.status==="Ativa").map((item)=>({name:item.name,category:item.category,account:item.account,value:item.value,frequency:"Mensal",source:"Assinatura"}))];
+  addDataSheet(workbook,"Recorrências","Planejamento — Recorrências",period,[{header:"Descrição",key:"name",width:32},{header:"Categoria",key:"category",width:20},{header:"Conta",key:"account",width:22},{header:"Valor",key:"value",width:18,format:"currency"},{header:"Frequência",key:"frequency",width:15},{header:"Origem",key:"source",width:16}],recurring,settings,{totals:{account:"ESTIMATIVA MENSAL",value:analytics.recurringCommitment}});
   addDataSheet(workbook,"Parcelamentos","Planejamento — Parcelamentos",period,[{header:"Data",key:"date",width:14},{header:"Descrição",key:"description",width:34},{header:"Conta",key:"account",width:22},{header:"Parcela",key:"installmentCurrent",width:11,format:"number"},{header:"Total",key:"installmentTotal",width:11,format:"number"},{header:"Valor",key:"value",width:18,format:"currency"}],analytics.futureInstallments.map((item)=>({...item,date:formatDate(item.date)})),settings,{totals:{account:"TOTAL FUTURO",value:analytics.futureInstallmentTotal}});}
 }
 
 export async function exportPlanningWorkbook(context:ExportContext){const workbook=await createWorkbook();addPlanningSheets(workbook,context);await download(workbook,`Nexo_Planejamento_${context.month}.xlsx`);}
 
-function addWealthSheet(workbook:Workbook,context:ExportContext){const rows=context.data.wealthItems.map((item)=>({name:item.name,kind:item.kind,group:item.group,value:item.value,debt:item.kind==="Ativo"?Number(item.remainingDebt||0):item.value,net:item.kind==="Ativo"?item.value-Number(item.remainingDebt||0):-item.value}));addDataSheet(workbook,"Patrimônio","Relatório patrimonial","Posição atual",[{header:"Item",key:"name",width:32},{header:"Tipo",key:"kind",width:13},{header:"Grupo",key:"group",width:20},{header:"Valor",key:"value",width:18,format:"currency"},{header:"Dívida",key:"debt",width:18,format:"currency"},{header:"Valor líquido",key:"net",width:18,format:"currency"}],rows,context.settings,{totals:{group:"ATIVOS / PASSIVOS / LÍQUIDO",value:context.analytics.grossAssets,debt:context.analytics.liabilities,net:context.analytics.netWorth}});}
+function addWealthSheet(workbook:Workbook,context:ExportContext){const rows=context.data.wealthItems.map((item)=>({name:item.name,kind:item.kind,group:item.group,value:item.value,debt:item.kind==="Ativo"?Number(item.remainingDebt||0):item.value,net:item.kind==="Ativo"?item.value-Number(item.remainingDebt||0):-item.value}));addDataSheet(workbook,"Patrimônio","Relatório patrimonial","Posição atual",[{header:"Item",key:"name",width:32},{header:"Tipo",key:"kind",width:13},{header:"Grupo",key:"group",width:20},{header:"Valor",key:"value",width:18,format:"currency"},{header:"Dívida",key:"debt",width:18,format:"currency"},{header:"Valor líquido",key:"net",width:18,format:"currency"}],rows,context.settings,{totals:{group:"SUBTOTAL DOS ITENS",value:context.data.wealthItems.filter(i=>i.kind==="Ativo").reduce((sum,i)=>sum+i.value,0),debt:context.data.wealthItems.reduce((sum,i)=>sum+(i.kind==="Passivo"?i.value:i.remainingDebt),0),net:rows.reduce((sum,i)=>sum+i.net,0)}});}
 export async function exportWealthWorkbook(context:ExportContext){const workbook=await createWorkbook();addWealthSheet(workbook,context);await download(workbook,`Nexo_Patrimonio_${new Date().toISOString().slice(0,10)}.xlsx`);}
 
 function addInvestmentsSheet(workbook:Workbook,context:ExportContext){addDataSheet(workbook,"Investimentos","Relatório de investimentos","Posição atual",[{header:"Investimento",key:"name",width:32},{header:"Classe",key:"type",width:20},{header:"Valor",key:"value",width:18,format:"currency"},{header:"Rentabilidade",key:"return",width:17,format:"percent"},{header:"Participação",key:"share",width:17,format:"percent"}],context.data.investments.map((item)=>({name:item.name,type:item.type,value:item.value,return:item.returnPct/100,share:context.analytics.portfolioTotal?item.value/context.analytics.portfolioTotal:0})),context.settings,{totals:{type:"TOTAL / MÉDIA",value:context.analytics.portfolioTotal,return:context.analytics.averageReturn/100,share:context.analytics.portfolioTotal?1:0}});}

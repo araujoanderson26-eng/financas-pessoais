@@ -9,7 +9,7 @@ const localBindingConfig = {
   main: "./worker/index.ts",
 };
 
-export default defineConfig(async () => {
+export default defineConfig(async ({ command }) => {
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
@@ -21,7 +21,7 @@ export default defineConfig(async () => {
 
   return {
     server: {
-      host: "0.0.0.0",
+      host: "127.0.0.1",
       allowedHosts: ["terminal.local"],
       ...(isCodexSeatbeltSandbox
         ? { watch: { useFsEvents: false, usePolling: true } }
@@ -31,9 +31,10 @@ export default defineConfig(async () => {
       vinext(),
       sites(),
       cloudflare({
+        remoteBindings: process.env.FINANCE_REMOTE_AI === "true",
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         inspectorPort: false,
-        config: localBindingConfig,
+        config: { ...localBindingConfig, ...(command === "serve" ? { vars: { LOCAL_DEV_AUTH: "true" } } : {}) },
       }),
     ],
   };

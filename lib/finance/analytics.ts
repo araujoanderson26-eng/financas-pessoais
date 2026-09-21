@@ -1,4 +1,4 @@
-import { clamp } from "@/lib/formatters";
+import { clamp, currentMonthKey, localIsoDate } from "@/lib/formatters";
 import type { FinanceData, Transaction } from "./types";
 
 export type MonthSummary = {
@@ -66,6 +66,7 @@ export function percentChange(current: number, previous: number) {
 }
 
 export function getFinancialAnalytics(data: FinanceData, selectedMonth: string, today = new Date()) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(selectedMonth)) selectedMonth = currentMonthKey(today);
   const rows = transactionsForMonth(data.transactions, selectedMonth);
   const totals = summarizeTransactions(rows);
   const previousKey = previousMonthKey(selectedMonth);
@@ -94,7 +95,8 @@ export function getFinancialAnalytics(data: FinanceData, selectedMonth: string, 
   const daysInMonth = new Date(Number(selectedMonth.slice(0, 4)), Number(selectedMonth.slice(5, 7)), 0).getDate();
   const currentKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
   const elapsedDays = selectedMonth === currentKey ? today.getDate() : daysInMonth;
-  const projectedExpenses = elapsedDays ? (totals.expenses / elapsedDays) * daysInMonth : 0;
+  const recordedToDate = rows.filter(item => item.type === "saida" && item.date <= localIsoDate(today)).reduce((sum, item) => sum + item.value, 0);
+  const projectedExpenses = selectedMonth === currentKey ? Math.max(totals.expenses, recordedToDate / elapsedDays * daysInMonth) : totals.expenses;
   const projectedBalance = totals.income - projectedExpenses;
   const daysRemaining = selectedMonth === currentKey ? Math.max(0, daysInMonth - today.getDate()) : 0;
   const reserveTarget = totals.fixed * 6;

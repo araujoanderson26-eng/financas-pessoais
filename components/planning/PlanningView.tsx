@@ -10,8 +10,9 @@ import { CurrencyValue, EmptyState, ExportButton, KpiCard, PanelHeader, Progress
 type Analytics = ReturnType<typeof getFinancialAnalytics>;
 type PlanningSection = "orcamento" | "contas" | "cartoes" | "metas" | "recorrencias" | "parcelamentos";
 
-export function PlanningView({ data, analytics, selectedMonth, hidden, onSave, onDelete, onExport }: {
+export function PlanningView({ data, initialSection = "orcamento", analytics, selectedMonth, hidden, onSave, onDelete, onExport }: {
   data: FinanceData;
+  initialSection?: PlanningSection;
   analytics: Analytics;
   selectedMonth: string;
   hidden: boolean;
@@ -19,7 +20,7 @@ export function PlanningView({ data, analytics, selectedMonth, hidden, onSave, o
   onDelete: (entity: "account" | "budget" | "goal", id: number, label: string) => void;
   onExport: () => void;
 }) {
-  const [section, setSection] = useState<PlanningSection>("orcamento");
+  const [section, setSection] = useState<PlanningSection>(initialSection);
   const availableBudget = analytics.budgetTotal - analytics.totals.expenses;
   const nonCardAccounts = data.accounts.filter((item) => item.type !== "Cartão de crédito");
   const cards = data.accounts.filter((item) => item.type === "Cartão de crédito");
@@ -34,7 +35,7 @@ export function PlanningView({ data, analytics, selectedMonth, hidden, onSave, o
 
   return <section className="planning-page section-page">
     <SectionHeader eyebrow="PLANEJAMENTO" title="Centro de planejamento" description="Organize o orçamento, contas, cartões, metas e compromissos futuros em um só lugar." actions={<ExportButton label="Baixar Excel" onClick={onExport}/>} />
-    <div className="kpi-grid planning-kpis"><KpiCard label="Orçamento total" value={analytics.budgetTotal} helper={selectedMonth} icon={WalletCards} tone="info" hidden={hidden}/><KpiCard label="Realizado" value={analytics.totals.expenses} helper={`${formatPercent(analytics.budgetTotal ? analytics.totals.expenses / analytics.budgetTotal * 100 : 0)} consumido`} icon={Landmark} tone={availableBudget >= 0 ? "positive" : "negative"} hidden={hidden}/><KpiCard label="Disponível" value={availableBudget} helper={availableBudget >= 0 ? "Ainda não utilizado" : "Acima do orçamento"} icon={Target} tone={availableBudget >= 0 ? "positive" : "negative"} hidden={hidden}/><KpiCard label="Compromissos recorrentes" value={analytics.recurringCommitment} helper="Lançamentos recorrentes + assinaturas" icon={Repeat2} tone="attention" hidden={hidden}/></div>
+    <div className="kpi-grid planning-kpis"><KpiCard label="Orçamento total" value={analytics.budgetTotal} helper={selectedMonth} icon={WalletCards} tone="info" hidden={hidden}/><KpiCard label="Realizado" value={analytics.totals.expenses} helper={`${formatPercent(analytics.budgetTotal ? analytics.totals.expenses / analytics.budgetTotal * 100 : 0)} consumido`} icon={Landmark} tone={availableBudget >= 0 ? "positive" : "negative"} hidden={hidden}/><KpiCard label="Disponível" value={availableBudget} helper={availableBudget >= 0 ? "Ainda não utilizado" : "Acima do orçamento"} icon={Target} tone={availableBudget >= 0 ? "positive" : "negative"} hidden={hidden}/><KpiCard label="Compromissos recorrentes" value={analytics.recurringCommitment} helper="Estimativa; assinaturas podem já estar lançadas" icon={Repeat2} tone="attention" hidden={hidden}/></div>
 
     <nav className="module-tabs" aria-label="Seções do planejamento">
       {([
@@ -66,7 +67,7 @@ export function PlanningView({ data, analytics, selectedMonth, hidden, onSave, o
       <article className="panel"><PanelHeader eyebrow="PROGRESSO" title="Metas financeiras"/><div className="goal-list">{goalRows.length ? goalRows.map((goal) => <article key={goal.id}><header><span><Target/><strong>{goal.name}<small>Prazo: {formatDate(goal.deadline)}</small></strong></span><button className="icon-button danger" onClick={() => onDelete("goal", goal.id, goal.name)} aria-label={`Excluir ${goal.name}`}><Trash2 size={14}/></button></header><div><span>Acumulado<strong><CurrencyValue value={goal.current} hidden={hidden}/></strong></span><span>Faltante<strong><CurrencyValue value={goal.missing} hidden={hidden}/></strong></span><span>Meses restantes<strong>{goal.monthsRemaining}</strong></span></div><ProgressBar value={goal.target ? goal.current / goal.target * 100 : 0} label="Progresso"/><p>Para atingir esta meta, o aporte matemático aproximado seria de <strong><CurrencyValue value={goal.monthlySuggestion} hidden={hidden}/></strong> por mês.</p></article>) : <EmptyState title="Nenhuma meta cadastrada" description="Crie objetivos com valor e prazo para calcular o aporte mensal necessário."/>}</div></article>
     </div>}
 
-    {section === "recorrencias" && <article className="panel full-module-panel"><PanelHeader eyebrow="COMPROMISSOS AUTOMÁTICOS" title="Despesas recorrentes"/><div className="recurrence-list">{recurringTransactions.length || analytics.activeSubscriptions.length ? <>{recurringTransactions.map((item) => <div key={`t-${item.id}`}><Repeat2/><span><strong>{item.description}</strong><small>{item.category} · {item.recurrence}</small></span><CurrencyValue value={item.value} hidden={hidden}/></div>)}{analytics.activeSubscriptions.map((item) => <div key={`s-${item.id}`}><Repeat2/><span><strong>{item.name}</strong><small>{item.category} · assinatura · dia {item.billingDay}</small></span><CurrencyValue value={item.value} hidden={hidden}/></div>)}</> : <EmptyState title="Nenhuma recorrência cadastrada" description="Marque lançamentos como mensais ou cadastre assinaturas para formar esta visão." icon={Repeat2}/>}</div></article>}
+    {section === "recorrencias" && <article className="panel full-module-panel"><PanelHeader eyebrow="RECORRÊNCIAS CADASTRADAS" title="Despesas recorrentes"/><div className="recurrence-list">{recurringTransactions.length || analytics.activeSubscriptions.length ? <>{recurringTransactions.map((item) => <div key={`t-${item.id}`}><Repeat2/><span><strong>{item.description}</strong><small>{item.category} · {item.recurrence}</small></span><CurrencyValue value={item.value} hidden={hidden}/></div>)}{analytics.activeSubscriptions.map((item) => <div key={`s-${item.id}`}><Repeat2/><span><strong>{item.name}</strong><small>{item.category} · assinatura · dia {item.billingDay}</small></span><CurrencyValue value={item.value} hidden={hidden}/></div>)}</> : <EmptyState title="Nenhuma recorrência cadastrada" description="Marque lançamentos como mensais ou cadastre assinaturas para formar esta visão." icon={Repeat2}/>}</div></article>}
 
     {section === "parcelamentos" && <article className="panel full-module-panel"><PanelHeader eyebrow="COMPROMISSOS FUTUROS" title="Parcelas já lançadas"/><div className="future-table">{analytics.futureInstallments.length ? analytics.futureInstallments.map((item) => <div key={item.id}><CalendarClock/><span><strong>{item.description}</strong><small>{formatDate(item.date)} · {item.account || "Conta não informada"}</small></span><StatusBadge tone="attention">{item.installmentCurrent}/{item.installmentTotal}</StatusBadge><CurrencyValue value={item.value} hidden={hidden}/></div>) : <EmptyState title="Nenhum parcelamento futuro" description="Compras parceladas aparecem aqui sem duplicar valores além das parcelas criadas." icon={CalendarClock}/>}</div></article>}
   </section>;

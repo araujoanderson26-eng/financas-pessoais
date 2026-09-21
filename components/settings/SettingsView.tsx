@@ -17,7 +17,7 @@ export function SettingsView({ settings, lastBackup, syncState, onPatch, onSaveP
 }) {
   const exports = [
     ["exportIdentity","Identidade Nexo","Inclui nome do produto e assinatura."],
-    ["exportOwner","Nome do proprietário","Exibe Anderson de Araujo no cabeçalho."],
+    ["exportOwner","Nome do proprietário","Exibe o nome configurado no perfil."],
     ["exportGeneratedAt","Data de geração","Registra data e hora do arquivo."],
     ["exportTotals","Totais","Adiciona resumos e linhas de totalização."],
     ["exportFilters","Filtros","Documenta o recorte aplicado."],

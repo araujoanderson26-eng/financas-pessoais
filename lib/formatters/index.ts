@@ -16,16 +16,18 @@ export function formatPercent(value: number, suffix = true) {
 
 export function formatDate(value: string) {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("pt-BR").format(new Date(`${value.slice(0, 10)}T12:00:00`));
+  const date = new Date(`${value.slice(0, 10)}T12:00:00`);
+  return Number.isFinite(date.getTime()) ? new Intl.DateTimeFormat("pt-BR").format(date) : "Data inválida";
 }
 
 export function formatDateTime(value: string) {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(date) : "Data inválida";
 }
 
 export function formatMonth(value: string) {
-  if (!/^\d{4}-\d{2}$/.test(value)) return "Período atual";
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return "Período atual";
   return new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(`${value}-01T12:00:00`));
 }
 

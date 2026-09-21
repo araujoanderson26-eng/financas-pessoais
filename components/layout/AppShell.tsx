@@ -49,6 +49,7 @@ export function AppShell({
   settings,
   alerts,
   searchItems,
+  onSearchResult,
   onNewTransaction,
   onTogglePrivacy,
   children,
@@ -60,6 +61,7 @@ export function AppShell({
   settings: UserSettings;
   alerts: ReturnType<typeof getFinancialAnalytics>["alerts"];
   searchItems: GlobalSearchItem[];
+  onSearchResult: (item: GlobalSearchItem) => void;
   onNewTransaction: () => void;
   onTogglePrivacy: () => void;
   children: React.ReactNode;
@@ -71,7 +73,7 @@ export function AppShell({
     if (normalized.length < 2) return [];
     return searchItems.filter((item) => `${item.label} ${item.meta}`.toLocaleLowerCase("pt-BR").includes(normalized)).slice(0, 8);
   }, [query, searchItems]);
-  const syncLabel = syncState === "saved" ? "Dados salvos" : syncState === "saving" ? "Salvando" : syncState === "loading" ? "Conectando" : syncState === "local" ? "Modo local" : "Erro de sincronização";
+  const syncLabel = syncState === "saved" ? "Dados salvos" : syncState === "saving" ? "Salvando" : syncState === "loading" ? "Conectando" : syncState === "local" ? "Acesso indisponível" : "Erro de sincronização";
 
   function navigate(tab: Tab) {
     onNavigate(tab);
@@ -96,24 +98,24 @@ export function AppShell({
           <p>SISTEMA</p>
           <button className={active === "configuracoes" ? "active" : ""} onClick={() => navigate("configuracoes")} aria-current={active === "configuracoes" ? "page" : undefined}><Settings size={18} />Configurações</button>
         </nav>
-        <div className="sidebar-profile"><div>AA</div><span><strong>Anderson de Araujo</strong><small>Conta pessoal</small></span></div>
+        <div className="sidebar-profile"><div>{settings.profileName.split(" ").filter(Boolean).slice(0,2).map(part => part[0]).join("")}</div><span><strong>{settings.profileName}</strong><small>Conta pessoal</small></span></div>
       </aside>
 
       <main className="main-area">
         <header className="topbar">
-          <button className="icon-button menu-button" onClick={() => setMenuOpen(true)} aria-label="Abrir menu"><Menu /></button>
+          <button className="icon-button menu-button" onClick={() => setMenuOpen(true)} aria-label="Abrir menu" aria-expanded={menuOpen}><Menu /></button>
           <div className={`sync-state ${syncState}`} title={syncLabel}><i />{syncLabel}</div>
           <div className="global-search">
             <Search size={16} aria-hidden="true" />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Pesquisar no Nexo" aria-label="Pesquisa global" />
-            {results.length > 0 && <div className="search-results">{results.map((item) => <button key={item.id} onClick={() => navigate(item.tab)}><span>{item.label}</span><small>{item.meta}</small></button>)}</div>}
+            {results.length > 0 && <div className="search-results">{results.map((item) => <button key={item.id} onClick={() => { onSearchResult(item); setQuery(""); setMenuOpen(false); }}><span>{item.label}</span><small>{item.meta}</small></button>)}</div>}
           </div>
           <span className="topbar-period">{formatMonth(selectedMonth)}</span>
           <button className="icon-button privacy-toggle" onClick={onTogglePrivacy} aria-label={settings.hideValues ? "Exibir valores" : "Ocultar valores"} title={settings.hideValues ? "Exibir valores" : "Ocultar valores"}>{settings.hideValues ? <EyeOff /> : <Eye />}</button>
           <AlertsButton alerts={alerts} selectedMonth={selectedMonth} syncState={syncState} />
           <button className="primary-button topbar-new" onClick={onNewTransaction}><Plus size={17} />Novo lançamento</button>
         </header>
-        <div className="content">{children}</div>
+        <div className="content" aria-busy={syncState === "saving"}>{children}</div>
       </main>
     </div>
   );

@@ -4,6 +4,8 @@ import { lazy, Suspense, useMemo, useState, type FormEvent } from "react";
 import { AppShell, type GlobalSearchItem } from "@/components/layout/AppShell";
 import { CategoryDeleteDialog, FinanceModals, type FinanceModal } from "@/components/modals/FinanceModals";
 import { ConfirmDialog, Skeleton, ToastViewport, type ToastItem } from "@/components/shared";
+import { useModuleNavigation } from "@/hooks/useModuleNavigation";
+import { csvCell } from "@/lib/finance/csv";
 import { useFinanceData } from "@/hooks/useFinanceData";
 import { getFinancialAnalytics } from "@/lib/finance/analytics";
 import { currentMonthKey, localIsoDate } from "@/lib/formatters";
@@ -30,9 +32,12 @@ type DeleteTarget = {
 };
 
 export default function Home() {
-  const { data, setData, syncState, refresh, sendAction } = useFinanceData();
-  const [active, setActive] = useState<Tab>("dashboard");
-  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey());
+  const { data, setData, syncState, error, refresh, sendAction } = useFinanceData();
+  const [active, setActive] = useModuleNavigation();
+  const [searchVersion, setSearchVersion] = useState(0);
+  const [planningSection, setPlanningSection] = useState<"orcamento" | "contas" | "cartoes" | "metas">("orcamento");
+  const [selectedMonth, updateSelectedMonth] = useState(currentMonthKey());
+  const setSelectedMonth = (month: string) => { if (/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) updateSelectedMonth(month); };
   const [modal, setModal] = useState<FinanceModal>(null);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -46,14 +51,24 @@ export default function Home() {
   const analytics = useMemo(() => getFinancialAnalytics(data, selectedMonth), [data, selectedMonth]);
   const reportNote = data.reportNotes.find((item) => item.month === selectedMonth);
   const exportContext = { data, analytics, month: selectedMonth, settings: data.settings, note: reportNote?.note || "" };
-  const syncLabel = syncState === "saved" ? "Dados salvos" : syncState === "saving" ? "Salvando" : syncState === "loading" ? "Conectando" : syncState === "local" ? "Modo local" : "Erro de sincronização";
+  const syncLabel = syncState === "saved" ? "Dados salvos" : syncState === "saving" ? "Salvando" : syncState === "loading" ? "Conectando" : syncState === "local" ? "Acesso indisponível" : "Erro de sincronização";
   const searchItems = useMemo<GlobalSearchItem[]>(() => [
     ...data.transactions.map((item) => ({ id: `transaction-${item.id}`, label: item.description, meta: `Movimentação · ${item.category}`, tab: "movimentos" as Tab })),
     ...data.accounts.map((item) => ({ id: `account-${item.id}`, label: item.name, meta: `Conta · ${item.type}`, tab: "planejamento" as Tab })),
     ...data.investments.map((item) => ({ id: `investment-${item.id}`, label: item.name, meta: `Investimento · ${item.type}`, tab: "investimentos" as Tab })),
     ...data.goals.map((item) => ({ id: `goal-${item.id}`, label: item.name, meta: "Meta financeira", tab: "planejamento" as Tab })),
-    ...data.subscriptions.map((item) => ({ id: `subscription-${item.id}`, label: item.name, meta: `Assinatura · ${item.category}`, tab: "assinaturas" as Tab })),
+    ...data.subscriptions.filter(item => item.status === "Ativa").map((item) => ({ id: `subscription-${item.id}`, label: item.name, meta: `Assinatura · ${item.category}`, tab: "assinaturas" as Tab })),
   ], [data]);
+
+  function selectSearchResult(item: GlobalSearchItem) {
+    setSearchVersion(version => version + 1);
+    const id = Number(item.id.split('-').at(-1));
+    if (item.id.startsWith('transaction-')) { const row = data.transactions.find(row => row.id === id); if (row) { setSelectedMonth(row.date.slice(0,7)); openTransaction(row); } }
+    if (item.id.startsWith('investment-')) { const row = data.investments.find(row => row.id === id); if (row) openInvestment(row); }
+    if (item.id.startsWith('account-')) setPlanningSection(data.accounts.find(row => row.id === id)?.type === 'Cartão de crédito' ? 'cartoes' : 'contas');
+    if (item.id.startsWith('goal-')) setPlanningSection('metas');
+    setActive(item.tab);
+  }
 
   function toast(tone: ToastItem["tone"], title: string, description?: string) {
     const id = Date.now() + Math.random();
@@ -180,32 +195,36 @@ export default function Home() {
     } catch (error) { toast("error", "A ação não foi concluída", error instanceof Error ? error.message : undefined); }
   }
 
-  async function saveSettings(next: UserSettings) {
-    setData((current) => ({ ...current, settings: next }));
-    try { await sendAction({ action: "save_settings", ...next }, { refresh: false }); toast("success", "Configuração salva"); }
-    catch (error) { toast("error", "Não foi possível salvar a configuração", error instanceof Error ? error.message : undefined); void refresh(true); }
+  async function saveSettings(next: Partial<UserSettings>) {
+    try { const result = await sendAction({ action: "save_settings", ...next }, { refresh: false }); setData((current) => ({ ...current, settings: result.item as UserSettings })); toast("success", "Configuração salva"); }
+    catch (error) { toast("error", "Não foi possível salvar a configuração", error instanceof Error ? error.message : undefined); }
   }
 
-  function patchSettings(patch: Partial<UserSettings>) { void saveSettings({ ...data.settings, ...patch }); }
+  function patchSettings(patch: Partial<UserSettings>) { void saveSettings(patch); }
 
   function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget).entries());
-    void saveSettings({ ...data.settings, profileName: String(values.profileName), productName: String(values.productName), signature: String(values.signature) });
+    void saveSettings({ profileName: String(values.profileName), productName: String(values.productName), signature: String(values.signature) });
   }
 
-  function downloadBackup() {
-    const link = document.createElement("a");
-    link.href = "/api/backup";
-    link.download = `Nexo_Backup_Completo_${localIsoDate()}.json`;
-    document.body.appendChild(link); link.click(); link.remove();
-    toast("info", "Backup iniciado", "O arquivo JSON inclui dados, configurações e histórico.");
-    window.setTimeout(() => void refresh(true), 1500);
+  async function downloadBackup() {
+    try {
+      const response = await fetch('/api/backup', { cache: 'no-store', signal: AbortSignal.timeout(30000) });
+      if (!response.ok) { const body = await response.json().catch(() => ({})) as { error?: string }; throw new Error(body.error || 'Não foi possível gerar o backup.'); }
+      const blob = await response.blob();
+      if (!blob.type.includes('application/json')) throw new Error('Resposta de backup inválida.');
+      const url = URL.createObjectURL(blob); const link = document.createElement('a');
+      link.href = url; link.download = 'Nexo_Backup_Completo_' + localIsoDate() + '.json'; link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast('success', 'Backup gerado', 'O arquivo JSON foi enviado para download.');
+      await refresh(true);
+    } catch (cause) { toast('error', 'Falha no backup', cause instanceof Error ? cause.message : undefined); }
   }
 
   function exportCsv(rows: Transaction[]) {
     const header = "data,descricao,categoria,natureza,tipo,valor,conta,recorrencia,parcela,total_parcelas";
-    const lines = rows.map((item) => [item.date,item.description,item.category,item.macro,item.type,item.value,item.account||"",item.recurrence||"Não",item.installmentCurrent||1,item.installmentTotal||1].map((value) => `"${String(value).replaceAll('"','""')}"`).join(","));
+    const lines = rows.map((item) => [item.date,item.description,item.category,item.macro,item.type,item.value,item.account||"",item.recurrence||"Não",item.installmentCurrent||1,item.installmentTotal||1].map(csvCell).join(","));
     const blob = new Blob(["\ufeff" + [header,...lines].join("\n")],{type:"text/csv;charset=utf-8"});
     const url = URL.createObjectURL(blob); const link=document.createElement("a"); link.href=url; link.download=`Nexo_Movimentacoes_${selectedMonth}.csv`; link.click(); URL.revokeObjectURL(url);
     toast("info", "Exportação CSV iniciada");
@@ -215,15 +234,15 @@ export default function Home() {
     toast("info", "Preparando Excel", `${label} será formatado com a identidade Nexo.`);
     try {
       await task();
-      if (record) await sendAction({ action: "record_backup", kind: label }, { refresh: true });
+      if (record) { try { await sendAction({ action: "record_backup", kind: label }, { refresh: true }); } catch { toast("info", "Excel gerado; histórico indisponível", "O arquivo foi gerado, mas o registro da exportação falhou."); return; } }
       toast("success", "Excel gerado", `${label} está pronto para abrir no Excel ou LibreOffice.`);
     } catch (error) { toast("error", "Falha ao gerar Excel", error instanceof Error ? error.message : undefined); }
   }
 
   const currentContent = syncState === "loading" && data.categories.length === 0 ? <section className="loading-page"><div className="skeleton-title"><Skeleton rows={2}/></div><div className="skeleton-grid">{Array.from({length:8},(_,index)=><article key={index}><Skeleton rows={3}/></article>)}</div></section> : <>
     {active === "dashboard" && <DashboardView data={data} analytics={analytics} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} hidden={data.settings.hideValues} onNavigate={setActive} onNewTransaction={() => openTransaction()}/>}
-    {active === "movimentos" && <TransactionsView transactions={data.transactions} categories={data.categories} accounts={data.accounts} selectedMonth={selectedMonth} hidden={data.settings.hideValues} onNew={() => openTransaction()} onEdit={openTransaction} onArchive={(item) => setDeleteTarget({kind:"transaction",id:item.id,label:item.description})} onExportXlsx={(rows,filters) => void runExcel("Excel de movimentações",async()=>{const excel=await loadExcel(); await excel.exportTransactionsWorkbook(exportContext,rows,filters);},false)} onExportCsv={exportCsv}/>}
-    {active === "planejamento" && <PlanningView data={data} analytics={analytics} selectedMonth={selectedMonth} hidden={data.settings.hideValues} onSave={savePlanning} onDelete={(kind,id,label)=>setDeleteTarget({kind,id,label})} onExport={() => void runExcel("Excel de planejamento",async()=>{const excel=await loadExcel(); await excel.exportPlanningWorkbook(exportContext);},false)}/>}
+    {active === "movimentos" && <TransactionsView key={selectedMonth} transactions={data.transactions} categories={data.categories} accounts={data.accounts} selectedMonth={selectedMonth} hidden={data.settings.hideValues} onNew={() => openTransaction()} onEdit={openTransaction} onArchive={(item) => setDeleteTarget({kind:"transaction",id:item.id,label:item.description})} onExportXlsx={(rows,filters) => void runExcel("Excel de movimentações",async()=>{const excel=await loadExcel(); await excel.exportTransactionsWorkbook(exportContext,rows,filters);},false)} onExportCsv={exportCsv}/>}
+    {active === "planejamento" && <PlanningView key={`${planningSection}-${searchVersion}`} initialSection={planningSection} data={data} analytics={analytics} selectedMonth={selectedMonth} hidden={data.settings.hideValues} onSave={savePlanning} onDelete={(kind,id,label)=>setDeleteTarget({kind,id,label})} onExport={() => void runExcel("Excel de planejamento",async()=>{const excel=await loadExcel(); await excel.exportPlanningWorkbook(exportContext);},false)}/>}
     {active === "patrimonio" && <WealthView items={data.wealthItems} analytics={analytics} hidden={data.settings.hideValues} onSave={saveWealth} onDelete={(item:WealthItem)=>setDeleteTarget({kind:"wealth",id:item.id,label:item.name})} onExport={() => void runExcel("Excel patrimonial",async()=>{const excel=await loadExcel(); await excel.exportWealthWorkbook(exportContext);},false)}/>}
     {active === "categorias" && <CategoriesView categories={data.categories} transactions={data.transactions} onNew={()=>openCategory()} onEdit={openCategory} onDelete={openCategoryDelete}/>}
     {active === "investimentos" && <InvestmentsView investments={data.investments} goals={data.goals} analytics={analytics} hidden={data.settings.hideValues} onNew={()=>openInvestment()} onEdit={openInvestment} onDelete={(item)=>item.id&&setDeleteTarget({kind:"investment",id:item.id,label:item.name})} onExport={() => void runExcel("Excel de investimentos",async()=>{const excel=await loadExcel(); await excel.exportInvestmentsWorkbook(exportContext);},false)}/>}
@@ -235,7 +254,7 @@ export default function Home() {
   </>;
 
   return <>
-    <AppShell active={active} onNavigate={setActive} selectedMonth={selectedMonth} syncState={syncState} settings={data.settings} alerts={analytics.alerts} searchItems={searchItems} onNewTransaction={() => openTransaction()} onTogglePrivacy={() => patchSettings({hideValues:!data.settings.hideValues})}><Suspense fallback={<section className="loading-page"><Skeleton rows={5}/></section>}>{currentContent}</Suspense></AppShell>
+    <AppShell active={active} onNavigate={setActive} selectedMonth={selectedMonth} syncState={syncState} settings={data.settings} alerts={analytics.alerts} searchItems={searchItems} onSearchResult={selectSearchResult} onNewTransaction={() => openTransaction()} onTogglePrivacy={() => patchSettings({hideValues:!data.settings.hideValues})}>{error && <div className="sync-error-banner" role="alert"><span>{error}</span><button className="secondary-button" onClick={() => void refresh()}>Recarregar dados</button></div>}<Suspense fallback={<section className="loading-page"><Skeleton rows={5}/></section>}>{currentContent}</Suspense></AppShell>
     <FinanceModals modal={modal} categories={data.categories} accounts={data.accounts} editingTransaction={editingTransaction} editingCategory={editingCategory} editingInvestment={editingInvestment} onClose={closeModal} onTransaction={submitTransaction} onCategory={submitCategory} onInvestment={submitInvestment}/>
     <CategoryDeleteDialog category={deletingCategory} categories={data.categories} replacementId={replacementCategoryId} busy={categoryDeleteBusy} onReplacementChange={setReplacementCategoryId} onCancel={()=>{setDeletingCategory(null);setReplacementCategoryId("");}} onConfirm={()=>void confirmCategoryDelete()}/>
     <ConfirmDialog open={Boolean(deleteTarget)} title={deleteTarget?.kind === "transaction" ? "Arquivar lançamento?" : deleteTarget?.kind === "subscription" ? "Arquivar assinatura?" : "Remover item?"} description={deleteTarget ? deleteTarget.kind === "transaction" ? `“${deleteTarget.label}” deixará de afetar os totais, mas continuará no histórico de auditoria.` : deleteTarget.kind === "subscription" ? `“${deleteTarget.label}” ficará inativa e deixará de compor o custo mensal.` : `“${deleteTarget.label}” será removido e os indicadores relacionados serão recalculados.` : ""} confirmLabel={deleteTarget?.kind === "transaction" || deleteTarget?.kind === "subscription" ? "Arquivar" : "Remover"} onCancel={()=>setDeleteTarget(null)} onConfirm={()=>void confirmDelete()}/>
